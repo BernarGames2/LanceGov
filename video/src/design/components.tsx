@@ -219,7 +219,7 @@ const badgeStyle: Record<BadgeVariant, React.CSSProperties> = {
     color: color.grafite,
     textTransform: "uppercase",
     letterSpacing: "0.08em",
-    fontSize: 20,
+    fontSize: 22,
   },
 };
 

@@ -35,7 +35,7 @@ O Raio-X roda na região `gru1` (São Paulo, `vercel.json`), perto das fontes. O
 - `src/lib/site.ts`: CNPJ, cidade/UF, WhatsApp (`NEXT_PUBLIC_WHATSAPP_NUMBER`) e e-mail.
 - `src/components/social-proof.tsx`: foto, nome e mini-bio do especialista; confirmar as condições da garantia de 14 dias.
 - `src/lib/testimonials.ts`: depoimentos reais, com autorização. Com a lista vazia o bloco não aparece.
-- `src/components/video-dialog.tsx`: passar `src` do vídeo de 2 minutos.
+- Vídeo "Como funciona": feito em código na pasta `video/` (veja `video/README.md` para editar e renderizar).
 - `/termos` e `/privacidade`: texto provisório, para revisão jurídica.
 - Páginas "em breve" (`src/app/(em-breve)/*`): ao criar a página real, troque o arquivo e apague a entrada em `src/lib/coming-soon.ts`.
 - Publicar em `lancegov.com.br` (`NEXT_PUBLIC_SITE_URL`) com o `.com` redirecionando.

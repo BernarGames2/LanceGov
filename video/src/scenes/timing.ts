@@ -21,7 +21,8 @@ export const TIMING = {
   "06-cofre": { seconds: 13, out: { type: "fade", frames: 15 } },
   "07-whatsapp": { seconds: 17.5, out: { type: "slide", frames: 18, direction: "from-right" } },
   "08-preco": { seconds: 11, out: { type: "fade", frames: 15 } },
-  "09-voce-decide": { seconds: 8.5, out: { type: "fade", frames: 18 } },
+  // Papel → tinta com cortina, como 04 → 05 (um fade passaria por um cinza chapado).
+  "09-voce-decide": { seconds: 8.5, out: { type: "wipe", frames: 18, direction: "from-bottom" } },
   "10-cta": { seconds: 10, out: { type: "none", frames: 0 } },
 } as const satisfies Record<string, { seconds: number; out: Transition }>;
 

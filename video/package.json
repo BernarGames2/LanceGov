@@ -4,8 +4,8 @@
   "description": "Vídeo \"Como a LanceGov funciona\" (Remotion). Renderiza para public/video/.",
   "scripts": {
     "studio": "remotion studio",
-    "render": "remotion render ComoFunciona ../public/video/como-funciona.mp4 --codec=h264 --crf=20",
-    "poster": "remotion still ComoFunciona ../public/video/como-funciona-poster.jpg --frame=0 --image-format=jpeg --jpeg-quality=85",
+    "render": "remotion render ComoFunciona out/como-funciona-master.mp4 --codec=h264 --crf=18 && node scripts/encode-web.mjs",
+    "poster": "remotion still ComoFunciona ../public/video/como-funciona-poster.jpg --frame=90 --image-format=jpeg --jpeg-quality=85 --scale=0.6667",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
