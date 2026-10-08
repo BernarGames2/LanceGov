@@ -26,6 +26,32 @@ const BLOCK = { w: 350, h: 250, gap: 40 } as const;
 const COUNT_FRAMES = 36;
 
 /**
+ * Grifo do kit, mas o texto herda o grafite do rótulo e só passa a tinta junto
+ * com a passada do lima (o Grifo do kit pinta de tinta desde o início).
+ */
+function GrifoNoTexto({ children, start }: { children: React.ReactNode; start: number }) {
+  const frame = useCurrentFrame();
+  const p = progress(frame, start, 12);
+  return (
+    <span
+      style={{
+        color: interpolateColors(p, [0, 1], [color.grafite, color.tinta]),
+        backgroundImage: `linear-gradient(${color.marcaTexto}, ${color.marcaTexto})`,
+        backgroundRepeat: "no-repeat",
+        backgroundPosition: "0 88%",
+        backgroundSize: `${p * 100}% 0.62em`,
+        padding: "0 0.06em",
+        margin: "0 -0.06em",
+        WebkitBoxDecorationBreak: "clone",
+        boxDecorationBreak: "clone",
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
  * "R$ 3,9 mi" a partir de décimos de milhão (39 → 3,9). O número fica em 64 px;
  * "R$" e "mi" em 40 px para caber no bloco de 350 px. A vírgula do mono é
  * apertada para "3,9" não ler como "3 , 9".
@@ -56,7 +82,7 @@ const STATS: Stat[] = [
   {
     target: 17,
     render: (v) => v,
-    label: <Grifo start={T.destaque}>exclusivas para ME/EPP</Grifo>,
+    label: <GrifoNoTexto start={T.destaque}>exclusivas para ME/EPP</GrifoNoTexto>,
     destaque: true,
   },
   {

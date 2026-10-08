@@ -42,11 +42,12 @@ const BUTTON_H = 96;
 const BUTTON_W = 612;
 
 /**
- * Ponteiro: sai de baixo e para no centro do botão. A ponta fica um pouco
- * abaixo e à direita do centro exato para a seta não cobrir o rótulo.
+ * Ponteiro: sai de baixo e para no botão. A ponta fica logo abaixo da linha
+ * de base do rótulo (ainda dentro do botão), para a seta não cobrir
+ * "licitações" no clique.
  */
 const MOUSE_FROM = { x: 1560, y: 1000 };
-const MOUSE_TO = { x: R.x + BUTTON_W / 2 + 30, y: R.buttonY + BUTTON_H / 2 + 12 };
+const MOUSE_TO = { x: R.x + BUTTON_W / 2 + 30, y: R.buttonY + 68 };
 
 /** Chip do perfil que entra com uma mola curta. */
 function Chip({ start, children }: { start: number; children: React.ReactNode }) {

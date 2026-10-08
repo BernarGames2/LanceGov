@@ -41,7 +41,7 @@ const BUBBLE_TEXT: React.CSSProperties = { fontSize: 32, maxWidth: "90%", textWr
 
 /**
  * O QuickReply do kit ocupa 86% do pai. Este pai mais largo deixa os botões
- * com os mesmos 90% da conversa que o balão de cima, alinhados à direita.
+ * com os mesmos 90% da conversa que o balão de cima (bordas alinhadas).
  */
 const QUICK_WRAP_WIDTH = `${(90 / 86) * 100}%`;
 

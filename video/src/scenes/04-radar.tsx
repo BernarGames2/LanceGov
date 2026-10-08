@@ -1,4 +1,4 @@
-import { Easing, interpolate, useCurrentFrame } from "remotion";
+import { Easing, interpolate, interpolateColors, useCurrentFrame } from "remotion";
 
 import { fadeUp, pop, progress, sec } from "../design/anim";
 import { Body, Grifo, Kicker, OpportunityCard, Stage, Title, type Oportunidade } from "../design/components";
@@ -33,6 +33,32 @@ const CARD_W = 800;
 /** Topo dos cartões: o par (≈384 + 32 + ≈442 px) fica centrado na altura. */
 const CARD_A_TOP = 111;
 const CARD_B_TOP = 527;
+
+/**
+ * Grifo do kit, mas o texto herda o grafite do rótulo e só passa a tinta junto
+ * com a passada do lima (o Grifo do kit pinta de tinta desde o início).
+ */
+function GrifoNoTexto({ children, start }: { children: React.ReactNode; start: number }) {
+  const frame = useCurrentFrame();
+  const p = progress(frame, start, 12);
+  return (
+    <span
+      style={{
+        color: interpolateColors(p, [0, 1], [color.grafite, color.tinta]),
+        backgroundImage: `linear-gradient(${color.marcaTexto}, ${color.marcaTexto})`,
+        backgroundRepeat: "no-repeat",
+        backgroundPosition: "0 88%",
+        backgroundSize: `${p * 100}% 0.62em`,
+        padding: "0 0.06em",
+        margin: "0 -0.06em",
+        WebkitBoxDecorationBreak: "clone",
+        boxDecorationBreak: "clone",
+      }}
+    >
+      {children}
+    </span>
+  );
+}
 
 const CARD_A: Oportunidade = {
   orgao: "Prefeitura de [Município]",
@@ -196,7 +222,7 @@ export default function Scene() {
           <span style={{ color: color.tinta, fontWeight: 500, whiteSpace: "nowrap" }}>Nota Lance</span>, de 0 a 100, e a
           recomendação:{" "}
           <span style={{ whiteSpace: "nowrap" }}>
-            <Grifo start={T.bodyGrifo}>vai ou não vai</Grifo>.
+            <GrifoNoTexto start={T.bodyGrifo}>vai ou não vai</GrifoNoTexto>.
           </span>
         </Body>
       </div>

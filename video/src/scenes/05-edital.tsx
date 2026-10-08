@@ -37,8 +37,12 @@ const TAG_DELAY = sec(0.15);
 /** Pisca em lima por 400 ms (12 f). */
 const FLASH_FRAMES = 12;
 
-/** Card do edital (px do quadro). O conteúdo começa em PAPER + borda (2) + padding. */
-const PAPER = { x: 840, y: 150, w: 920, h: 780, pad: 36 } as const;
+/**
+ * Card do edital (px do quadro). O conteúdo começa em PAPER + borda (2) + padding.
+ * 750 px de altura (e não 780) para a lista mais longa não deixar um vão no pé
+ * do card; o card continua centrado na altura (165–915).
+ */
+const PAPER = { x: 840, y: 165, w: 920, h: 750, pad: 36 } as const;
 const INNER = { x: PAPER.x + 2 + PAPER.pad, y: PAPER.y + 2 + PAPER.pad, w: PAPER.w - 4 - PAPER.pad * 2 } as const;
 
 /** Geometria interna do card (y relativo ao topo do conteúdo). */
@@ -56,6 +60,7 @@ const TABS = [
   { label: "Prazos", w: 134 },
 ] as const;
 const TRACK_PAD = 5;
+const TRACK_W = TRACK_PAD * 2 + TABS.reduce((s, t) => s + t.w, 0);
 const tabX = (i: number) => TRACK_PAD + TABS.slice(0, i).reduce((s, t) => s + t.w, 0);
 
 /** Ponteiro: nasce na borda direita do card e para no centro da aba Riscos. */
@@ -65,7 +70,7 @@ const RISCOS_CENTER = {
 };
 const MOUSE_FROM = { x: PAPER.x + PAPER.w - 30, y: PAPER.y + 470 };
 /** A ponta para abaixo e à direita do rótulo, para a seta não cobrir "Riscos". */
-const MOUSE_TO = { x: RISCOS_CENTER.x + 38, y: RISCOS_CENTER.y + 14 };
+const MOUSE_TO = { x: RISCOS_CENTER.x + 44, y: RISCOS_CENTER.y + 16 };
 
 /** Selos do cabeçalho em 24 px: a fileira fica longe do rótulo "Nota Lance". */
 const HEADER_BADGE: React.CSSProperties = { fontSize: 24, gap: 8, padding: "6px 16px" };
@@ -134,7 +139,7 @@ function Row({ linha, start, first, flashAt }: { linha: Linha; start: number; fi
         justifyContent: "space-between",
         alignItems: "flex-start",
         gap: 32,
-        padding: "26px 0",
+        padding: "30px 0",
         borderTop: first ? undefined : `2px solid ${color.linha}`,
         ...fadeUp(frame, start, 12, 16),
       }}
@@ -161,11 +166,37 @@ function Tabs() {
     extrapolateRight: "clamp",
   });
 
+  const pillH = TABS_H - TRACK_PAD * 2;
+  // Camada de rótulos em papel recortada no formato da pílula: o texto fica
+  // claro só onde a pílula está, sem passar por tons de baixo contraste.
+  const clipL = left + (width * (1 - press)) / 2;
+  const clipR = TRACK_W - (left + width) + (width * (1 - press)) / 2;
+  const clipV = TRACK_PAD + (pillH * (1 - press)) / 2;
+  const labels = (c: string) =>
+    TABS.map((t) => (
+      <div
+        key={t.label}
+        style={{
+          position: "relative",
+          width: t.w,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 28,
+          fontWeight: 500,
+          color: c,
+        }}
+      >
+        {t.label}
+      </div>
+    ));
+
   return (
     <div
       style={{
         position: "relative",
         display: "flex",
+        width: TRACK_W,
         height: TABS_H,
         padding: TRACK_PAD,
         boxSizing: "border-box",
@@ -179,33 +210,25 @@ function Tabs() {
           top: TRACK_PAD,
           left,
           width,
-          height: TABS_H - TRACK_PAD * 2,
+          height: pillH,
           borderRadius: radius.pill,
           background: color.tinta,
           transform: `scale(${press})`,
           boxShadow: "0 2px 6px rgba(15,27,45,0.18)",
         }}
       />
-      {TABS.map((t, i) => {
-        const on = i === 0 ? 1 - move : i === 2 ? move : 0;
-        return (
-          <div
-            key={t.label}
-            style={{
-              position: "relative",
-              width: t.w,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 28,
-              fontWeight: 500,
-              color: interpolateColors(on, [0, 1], [color.grafite, color.papel]),
-            }}
-          >
-            {t.label}
-          </div>
-        );
-      })}
+      {labels(color.grafite)}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          padding: TRACK_PAD,
+          clipPath: `inset(${clipV}px ${clipR}px ${clipV}px ${clipL}px round ${pillH / 2}px)`,
+        }}
+      >
+        {labels(color.papel)}
+      </div>
     </div>
   );
 }
@@ -297,7 +320,9 @@ function Edital() {
             <Badge style={HEADER_BADGE}>Exclusiva ME/EPP</Badge>
             <Badge variant="prazo" style={HEADER_BADGE}>
               <CalendarClock size={22} strokeWidth={2} />
-              Sessão em <Mono>12</Mono> dias
+              <span>
+                Sessão em <Mono>12</Mono> dias
+              </span>
             </Badge>
           </div>
         </div>
