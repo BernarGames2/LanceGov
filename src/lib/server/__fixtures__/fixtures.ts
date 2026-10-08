@@ -1,0 +1,97 @@
+/** Respostas de exemplo no formato das fontes reais, para os testes. */
+
+export const brasilApiEmpresa = {
+  cnpj: "11222333000181",
+  razao_social: "DISTRIBUIDORA EXEMPLO DE LIMPEZA LTDA",
+  nome_fantasia: "",
+  uf: "SP",
+  municipio: "CAMPINAS",
+  porte: "EMPRESA DE PEQUENO PORTE",
+  opcao_pelo_mei: false,
+  cnae_fiscal: 4649408,
+  cnae_fiscal_descricao: "Comércio atacadista de produtos de higiene, limpeza e conservação domiciliar",
+  cnaes_secundarios: [
+    { codigo: 4761003, descricao: "Comércio varejista de artigos de papelaria" },
+    { codigo: 0, descricao: "" },
+  ],
+  descricao_situacao_cadastral: "ATIVA",
+};
+
+export const searchResponse = {
+  items: [
+    {
+      id: "a",
+      title: "Edital nº 12/2026",
+      description: "Registro de preços para aquisição de material de limpeza e higiene para as escolas municipais",
+      item_url: "/editais/46000000000100/2026/12",
+      orgao_cnpj: "46000000000100",
+      orgao_nome: "MUNICIPIO DE CAMPINAS",
+      municipio_nome: "Campinas",
+      uf: "SP",
+      modalidade_licitacao_nome: "Pregão - Eletrônico",
+      valor_global: 184000,
+      data_fim_vigencia: "2026-10-20T09:00:00",
+      numero_controle_pncp: "46000000000100-1-000012/2026",
+      ano: "2026",
+      numero_sequencial: "12",
+      situacao_nome: "Divulgada no PNCP",
+      cancelado: false,
+    },
+    {
+      id: "b",
+      title: "Edital nº 3/2026",
+      description: "Aquisição de material de limpeza para a Câmara",
+      item_url: "/editais/01000000000100/2026/3",
+      orgao_cnpj: "01000000000100",
+      orgao_nome: "CAMARA MUNICIPAL DE SOROCABA",
+      municipio_nome: "Sorocaba",
+      uf: "SP",
+      modalidade_licitacao_nome: "Dispensa",
+      valor_global: 18900,
+      data_fim_vigencia: "2026-10-15T23:59:00",
+      numero_controle_pncp: "01000000000100-1-000003/2026",
+      ano: "2026",
+      numero_sequencial: "3",
+      situacao_nome: "Divulgada no PNCP",
+      cancelado: false,
+    },
+    {
+      id: "c",
+      description: "Licitação já encerrada",
+      orgao_nome: "MUNICIPIO X",
+      uf: "SP",
+      valor_global: 1000,
+      data_fim_vigencia: "2026-09-01T09:00:00",
+      numero_controle_pncp: "old",
+    },
+  ],
+  total: 37,
+};
+
+export const consultaResponse = {
+  data: [
+    {
+      numeroControlePNCP: "99000000000100-1-000044/2026",
+      anoCompra: 2026,
+      sequencialCompra: 44,
+      modalidadeNome: "Pregão - Eletrônico",
+      objetoCompra: "Aquisição de MATERIAL DE LIMPEZA e copa",
+      valorTotalEstimado: 52000.5,
+      dataEncerramentoProposta: "2026-10-25T10:00:00",
+      orgaoEntidade: { cnpj: "99000000000100", razaoSocial: "MUNICIPIO DE JUNDIAI" },
+      unidadeOrgao: { ufSigla: "SP", municipioNome: "Jundiaí", nomeUnidade: "Secretaria de Educação" },
+    },
+    {
+      numeroControlePNCP: "99000000000100-1-000045/2026",
+      anoCompra: 2026,
+      sequencialCompra: 45,
+      modalidadeNome: "Pregão - Eletrônico",
+      objetoCompra: "Contratação de serviço de transporte escolar",
+      valorTotalEstimado: 900000,
+      dataEncerramentoProposta: "2026-10-25T10:00:00",
+      orgaoEntidade: { cnpj: "99000000000100", razaoSocial: "MUNICIPIO DE JUNDIAI" },
+      unidadeOrgao: { ufSigla: "SP", municipioNome: "Jundiaí" },
+    },
+  ],
+  totalPaginas: 1,
+};

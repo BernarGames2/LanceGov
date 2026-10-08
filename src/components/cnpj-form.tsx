@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { RAIO_X_INPUT_ID } from "@/components/raio-x-link";
 import { track } from "@/lib/analytics";
 import { cleanCnpj, formatCnpj, isValidCnpj } from "@/lib/cnpj";
-import { fetchRaioX } from "@/lib/raio-x";
+import { fetchRaioX, RaioXError } from "@/lib/raio-x";
 import { RAIO_X_ANCHOR } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
@@ -76,11 +76,13 @@ export function CnpjForm({
     track("cnpj_submit", { origem, formato: /[A-Z]/.test(cnpj) ? "alfanumerico" : "numerico" });
 
     try {
-      await fetchRaioX(cnpj);
+      await fetchRaioX(cnpj, { retry: true });
       router.push(`/raio-x?cnpj=${cnpj}`);
-    } catch {
+    } catch (failure) {
       setLoading(false);
-      setError("Não deu para fazer o Raio-X agora. Tente de novo em instantes.");
+      setError(
+        failure instanceof RaioXError ? failure.message : "Não deu para fazer o Raio-X agora. Tente de novo em instantes.",
+      );
     }
   }
 

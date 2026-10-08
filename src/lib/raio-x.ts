@@ -2,83 +2,138 @@ import { cleanCnpj } from "./cnpj";
 
 export type Participacao = "exclusiva" | "cota" | "ampla";
 
+export type Porte = "MEI" | "ME" | "EPP" | "Demais" | "Não informado";
+
 export type Oportunidade = {
   id: string;
   orgao: string;
+  municipio?: string;
+  uf?: string;
   objeto: string;
   modalidade: string;
-  valor: number;
-  participacao: Participacao;
-  notaLance: number;
-  recomendacao: "vai" | "nao-vai";
-  diasParaSessao: number;
-  motivo: string;
+  /** Valor estimado em reais. null quando sigiloso ou não informado. */
+  valor: number | null;
+  /** Benefício ME/EPP, quando conhecido (exemplos). */
+  participacao?: Participacao;
+  /** Valor até R$ 80 mil: em regra, disputa exclusiva para ME/EPP (LC 123, art. 48). */
+  faixaMeEpp?: boolean;
+  /** Nota Lance e recomendação: só depois que a IA lê o edital. */
+  notaLance?: number;
+  recomendacao?: "vai" | "nao-vai";
+  motivo?: string;
+  /** Dias até a sessão (exemplos). */
+  diasParaSessao?: number;
+  /** Fim do recebimento de propostas (ISO), quando o PNCP informa. */
+  encerramento?: string;
+  /** Página da licitação no PNCP. */
+  url?: string;
 };
 
 export type RaioXResult = {
   cnpj: string;
-  /** true enquanto o resultado vier do mock, e não da API. */
+  /** true para o resultado ilustrativo usado no site; os dados reais vêm com false. */
   exemplo: boolean;
+  empresa?: {
+    nome: string;
+    uf?: string;
+    municipio?: string;
+    /** Situação cadastral na Receita (ATIVA, BAIXADA...). */
+    situacao?: string;
+  };
   perfil: {
     cnae: string;
     descricaoCnae: string;
-    porte: "MEI" | "ME" | "EPP" | "Demais";
+    porte: Porte;
   };
   abertas: {
     quantidade: number;
+    /** true quando o PNCP tem mais resultados do que os consultados. */
+    haMais?: boolean;
     valorTotal: number;
     exclusivasMeEpp: number;
   };
+  /** Licitações que passaram nas últimas 4 semanas (ainda não calculado com dados reais). */
   ultimas4Semanas: {
     quantidade: number;
     valorTotal: number;
-  };
+  } | null;
   oportunidades: Oportunidade[];
+  /** Termos usados na busca, derivados dos CNAEs. */
+  termos?: string[];
+  /** Onde a busca foi feita: a UF da empresa ou o Brasil todo. */
+  abrangencia?: "uf" | "brasil";
+  consultadoEm?: string;
 };
 
-/**
- * Endpoint do Raio-X. Sem ele, fetchRaioX devolve o resultado de exemplo.
- * Ex.: NEXT_PUBLIC_RAIOX_API_URL=/api/raio-x
- * Contrato: POST { cnpj: "12ABC34501DE35" } → RaioXResult (com exemplo: false).
- */
-const API_URL = process.env.NEXT_PUBLIC_RAIOX_API_URL;
+/** Erro com mensagem pronta para mostrar ao visitante. */
+export class RaioXError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "RaioXError";
+  }
+}
 
-const MOCK_DELAY_MS = 2000;
+/**
+ * Endpoint do Raio-X: a rota do próprio site (app/api/raio-x) por padrão.
+ * Contrato: POST { cnpj: "12ABC34501DE35" } → RaioXResult, ou { message } com status de erro.
+ */
+const API_URL = process.env.NEXT_PUBLIC_RAIOX_API_URL || "/api/raio-x";
+
+const GENERIC_ERROR = "Não deu para fazer o Raio-X agora. Tente de novo em instantes.";
 
 const cache = new Map<string, Promise<RaioXResult>>();
+const failed = new Set<string>();
 
 /**
  * Busca o Raio-X de um CNPJ. O resultado fica em memória para o formulário
- * e a página /raio-x compartilharem a mesma requisição.
+ * e a página /raio-x compartilharem a mesma requisição. Uma falha também fica
+ * guardada (senão a página pediria de novo a cada renderização) até alguém
+ * pedir outra tentativa com `retry` ou forgetRaioXFailures().
  */
-export function fetchRaioX(cnpj: string): Promise<RaioXResult> {
+export function fetchRaioX(cnpj: string, { retry = false } = {}): Promise<RaioXResult> {
   const key = cleanCnpj(cnpj);
+  if (retry && failed.has(key)) {
+    cache.delete(key);
+    failed.delete(key);
+  }
   const cached = cache.get(key);
   if (cached) return cached;
 
-  const request = (API_URL ? requestApi(API_URL, key) : mockRaioX(key)).catch((error) => {
-    cache.delete(key);
+  const request = requestApi(API_URL, key).catch((error) => {
+    failed.add(key);
     throw error;
   });
   cache.set(key, request);
   return request;
 }
 
-async function requestApi(url: string, cnpj: string): Promise<RaioXResult> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cnpj }),
-  });
-  if (!response.ok) {
-    throw new Error(`Raio-X respondeu ${response.status}`);
-  }
-  return response.json();
+/** Libera nova tentativa para os CNPJs que falharam (botão "Tentar de novo"). */
+export function forgetRaioXFailures() {
+  for (const key of failed) cache.delete(key);
+  failed.clear();
 }
 
-async function mockRaioX(cnpj: string): Promise<RaioXResult> {
-  await new Promise((resolve) => setTimeout(resolve, MOCK_DELAY_MS));
-  return { ...EXEMPLO, cnpj };
+async function requestApi(url: string, cnpj: string): Promise<RaioXResult> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cnpj }),
+    });
+  } catch {
+    throw new RaioXError("Sem conexão com a LanceGov. Confira a internet e tente de novo.", 0);
+  }
+
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = typeof data?.message === "string" ? data.message : GENERIC_ERROR;
+    throw new RaioXError(message, response.status);
+  }
+  return data as RaioXResult;
 }
 
 export const EXEMPLO: RaioXResult = {

@@ -21,12 +21,14 @@ Copie `.env.example` para `.env.local` quando for ligar as integrações abaixo.
 
 | O quê | Onde | Hoje |
 | --- | --- | --- |
-| Raio-X do CNPJ | `fetchRaioX(cnpj)` em `src/lib/raio-x.ts` | Sem `NEXT_PUBLIC_RAIOX_API_URL`, devolve o exemplo após 2 s. Com ela, faz `POST { cnpj }` e espera um `RaioXResult` com `exemplo: false`. |
+| Raio-X do CNPJ | Rota `src/app/api/raio-x/route.ts` | Dados reais: empresa na base pública da Receita (BrasilAPI, com minhareceita.org de reserva) e licitações abertas no PNCP (busca do portal, com a API oficial de consulta de reserva). Os CNAEs viram termos de busca em `src/lib/cnae-terms.ts`. A Nota Lance só aparece depois da leitura do edital, que ainda não existe. |
 | Contadores (faixa de confiança e prova social) | `getSiteStats()` em `src/lib/stats.ts` | Sem `LANCEGOV_STATS_URL`, mostra "—". Com ela, lê `{ valorMonitoradoHoje, editaisLidosSemana }` e revalida a cada minuto. |
 | Analytics | `send()` em `src/lib/analytics.ts` | Empurra para `window.dataLayer`, e só depois do consentimento de cookies. Troque por PostHog, GA4 etc. |
 | Assinatura e vendas | `signupUrl()` e `salesUrl` em `src/lib/site.ts` | Apontam para `/entrar` e `/contato` (páginas "em breve"). |
 
 Eventos registrados: `cta_click`, `cnpj_submit`, `cnpj_invalid`, `raiox_view`, `plan_select`, `whatsapp_click`, `faq_open`. O CNPJ digitado não vai para o analytics.
+
+O Raio-X roda na região `gru1` (São Paulo, `vercel.json`), perto das fontes. Os logs da rota começam com `[raio-x]` no painel da Vercel.
 
 ## Antes de publicar
 
