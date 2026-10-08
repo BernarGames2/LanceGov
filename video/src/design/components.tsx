@@ -89,17 +89,28 @@ export function Grifo({ children, start }: { children: React.ReactNode; start: n
   );
 }
 
-/** Rótulo pequeno acima do título (ex.: "PASSO 1"). */
-export function Kicker({ children, dark = false }: { children: React.ReactNode; dark?: boolean }) {
+/** Rótulo acima do título (ex.: "PASSO 1"). */
+export function Kicker({
+  children,
+  dark = false,
+  fontSize = 38,
+  style,
+}: {
+  children: React.ReactNode;
+  dark?: boolean;
+  fontSize?: number;
+  style?: React.CSSProperties;
+}) {
   return (
     <div
       style={{
         fontFamily: font.mono,
         fontWeight: 500,
-        fontSize: size.tiny,
+        fontSize,
         letterSpacing: "0.12em",
         textTransform: "uppercase",
         color: dark ? color.papelSuave : color.grafite,
+        ...style,
       }}
     >
       {children}
@@ -623,6 +634,54 @@ export function TextField({
         />
       )}
     </div>
+  );
+}
+
+/** Selo "pág. N": a página do edital de onde a resposta saiu. `flash` pinta de lima. */
+export function PageTag({ page, flash = false, style }: { page: number; flash?: boolean; style?: React.CSSProperties }) {
+  return (
+    <span
+      style={{
+        flexShrink: 0,
+        fontFamily: font.mono,
+        fontWeight: 500,
+        fontSize: 26,
+        lineHeight: 1,
+        padding: "8px 14px",
+        borderRadius: 8,
+        border: `2px solid ${flash ? color.marcaTexto : color.linha}`,
+        background: flash ? color.marcaTexto : color.papel,
+        color: flash ? color.tinta : color.grafite,
+        whiteSpace: "nowrap",
+        ...style,
+      }}
+    >
+      pág. {page}
+    </span>
+  );
+}
+
+/** Anel de toque (dedo na tela), centrado em x/y, a partir de `at`. */
+export function TapRing({ x, y, at }: { x: number; y: number; at: number }) {
+  const frame = useCurrentFrame();
+  if (frame < at) return null;
+  const p = interpolate(frame, [at, at + 16], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: x - 40,
+        top: y - 40,
+        width: 80,
+        height: 80,
+        borderRadius: 999,
+        background: "rgba(15,27,45,0.18)",
+        border: `4px solid ${color.tinta}`,
+        opacity: 1 - p,
+        transform: `scale(${0.5 + p * 0.8})`,
+        pointerEvents: "none",
+      }}
+    />
   );
 }
 
