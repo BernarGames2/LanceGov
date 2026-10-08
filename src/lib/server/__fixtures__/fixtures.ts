@@ -17,6 +17,47 @@ export const brasilApiEmpresa = {
   descricao_situacao_cadastral: "ATIVA",
 };
 
+export const cnpjaEmpresa = {
+  taxId: "11222333000181",
+  alias: null,
+  company: {
+    name: "DISTRIBUIDORA EXEMPLO DE LIMPEZA LTDA",
+    size: { id: 3, acronym: "EPP", text: "Empresa de Pequeno Porte" },
+    simei: { optant: false },
+  },
+  status: { id: 2, text: "Ativa" },
+  address: { city: "Campinas", state: "SP" },
+  mainActivity: { id: 4649408, text: "Comércio atacadista de produtos de higiene, limpeza e conservação domiciliar" },
+  sideActivities: [{ id: 4761003, text: "Comércio varejista de artigos de papelaria" }],
+};
+
+export const cnpjWsEmpresa = {
+  razao_social: "LIMPEZA SILVA LTDA",
+  porte: { id: "01", descricao: "Micro Empresa" },
+  simples: { mei: "Não" },
+  estabelecimento: {
+    nome_fantasia: "LIMPEZA SILVA",
+    situacao_cadastral: "Ativa",
+    atividade_principal: { id: "4649408", subclasse: "4649-4/08", descricao: "Comércio atacadista de produtos de higiene" },
+    atividades_secundarias: [{ id: "4930202", subclasse: "4930-2/02", descricao: "Transporte rodoviário de carga" }],
+    estado: { sigla: "SP" },
+    cidade: { nome: "Campinas" },
+  },
+};
+
+export const receitaWsEmpresa = {
+  status: "OK",
+  nome: "DISTRIBUIDORA EXEMPLO DE LIMPEZA LTDA",
+  fantasia: "",
+  uf: "SP",
+  municipio: "CAMPINAS",
+  porte: "EMPRESA DE PEQUENO PORTE",
+  situacao: "ATIVA",
+  atividade_principal: [{ code: "46.49-4-08", text: "Comércio atacadista de produtos de higiene" }],
+  atividades_secundarias: [{ code: "47.61-0-03", text: "Comércio varejista de artigos de papelaria" }],
+  simei: { optante: false },
+};
+
 export const searchResponse = {
   items: [
     {

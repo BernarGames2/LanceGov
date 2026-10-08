@@ -42,6 +42,7 @@ describe("POST /api/raio-x", () => {
 
 describe("limite por IP", () => {
   it("responde 429 depois de muitas consultas seguidas", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })));
     let last = 0;
     for (let i = 0; i < 14; i++) {

@@ -10,28 +10,38 @@ export class SourceError extends Error {
   }
 }
 
-const USER_AGENT = "LanceGov/1.0 (+https://lancegov.com.br)";
+/** Formato de robô conhecido: alguns firewalls barram agentes sem cara de navegador. */
+const USER_AGENT = "Mozilla/5.0 (compatible; LanceGov/1.0; +https://lancegov.com.br)";
 
 /**
  * GET de JSON com tempo limite. 204 (sem conteúdo) devolve null, como o PNCP
- * faz quando a busca não tem resultado.
+ * faz quando a busca não tem resultado. `signal` cancela antes do tempo.
  */
-export async function getJson<T>(source: string, url: string, timeoutMs: number): Promise<T | null> {
+export async function getJson<T>(
+  source: string,
+  url: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<T | null> {
   let response: Response;
   try {
+    const timeout = AbortSignal.timeout(timeoutMs);
     response = await fetch(url, {
       headers: { Accept: "application/json", "User-Agent": USER_AGENT },
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
       cache: "no-store",
     });
   } catch (error) {
-    const reason = error instanceof Error && error.name === "TimeoutError" ? "tempo esgotado" : "falha de rede";
-    throw new SourceError(source, 0, `${source}: ${reason}`);
+    const name = error instanceof Error ? error.name : "";
+    const reason = name === "TimeoutError" ? "tempo esgotado" : name === "AbortError" ? "cancelada" : "falha de rede";
+    const detail = error instanceof Error && error.cause instanceof Error ? ` (${error.cause.message})` : "";
+    throw new SourceError(source, 0, `${source}: ${reason}${detail}`);
   }
 
   if (response.status === 204) return null;
   if (!response.ok) {
-    throw new SourceError(source, response.status, `${source} respondeu ${response.status}`);
+    const body = (await response.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 160);
+    throw new SourceError(source, response.status, `${source} respondeu ${response.status}${body ? `: ${body}` : ""}`);
   }
   try {
     return (await response.json()) as T;

@@ -1,10 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { brasilApiEmpresa, consultaResponse, searchResponse } from "./__fixtures__/fixtures";
+import {
+  brasilApiEmpresa,
+  cnpjaEmpresa,
+  cnpjWsEmpresa,
+  consultaResponse,
+  receitaWsEmpresa,
+  searchResponse,
+} from "./__fixtures__/fixtures";
 import { SourceError } from "./http";
 import { fromConsultaItem, fromSearchItem, parseDate, searchOpen, titleOrgao } from "./pncp";
 import { buildRaioX, MESSAGES, rank, RaioXFailure, type RaioXDeps } from "./raio-x";
-import { getEmpresa, titleCase, toEmpresa } from "./receita";
+import { fromCnpjWs, fromReceitaWs, getEmpresa, titleCase, toEmpresa } from "./receita";
 
 const NOW = new Date("2026-10-08T12:00:00-03:00");
 
@@ -37,14 +44,45 @@ describe("Receita", () => {
     expect(toEmpresa("x", { opcao_pelo_mei: true, porte: "MICRO EMPRESA", razao_social: "A" }).porte).toBe("MEI");
   });
 
-  it("tenta o minhareceita.org quando a BrasilAPI falha", async () => {
-    const fetchMock = vi.fn(async (url: string) =>
-      url.includes("brasilapi") ? jsonResponse({ message: "erro" }, 500) : jsonResponse(brasilApiEmpresa),
-    );
+  it("usa as outras fontes quando a BrasilAPI falha, e não espera quando ela falha rápido", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("brasilapi")) return jsonResponse({ message: "bloqueado" }, 403);
+      if (url.includes("cnpja")) return jsonResponse(cnpjaEmpresa);
+      return jsonResponse({ message: "erro" }, 500);
+    });
     vi.stubGlobal("fetch", fetchMock);
+    const started = Date.now();
     const empresa = await getEmpresa("10000000000100");
-    expect(empresa.nome).toBe("Distribuidora Exemplo de Limpeza LTDA");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(empresa).toMatchObject({ nome: "Distribuidora Exemplo de Limpeza LTDA", uf: "SP", municipio: "CAMPINAS", porte: "EPP" });
+    expect(empresa.cnaes.map((c) => c.codigo)).toEqual(["4649408", "4761003"]);
+  });
+
+  it("lê os formatos do CNPJ.ws e do ReceitaWS", () => {
+    expect(fromCnpjWs("1", cnpjWsEmpresa)).toMatchObject({
+      nome: "Limpeza Silva",
+      uf: "SP",
+      municipio: "CAMPINAS",
+      porte: "ME",
+      cnaes: [{ codigo: "4649408" }, { codigo: "4930202" }],
+    });
+    expect(fromReceitaWs("1", receitaWsEmpresa)).toMatchObject({
+      nome: "Distribuidora Exemplo de Limpeza LTDA",
+      porte: "EPP",
+      situacao: "ATIVA",
+      cnaes: [{ codigo: "4649408" }, { codigo: "4761003" }],
+    });
+    expect(fromReceitaWs("1", { status: "ERROR", message: "CNPJ inválido" })).toBe("nao-encontrado");
+    expect(() => fromReceitaWs("1", { status: "ERROR", message: "Too many requests" })).toThrow();
+  });
+
+  it("diz quais fontes falharam quando nenhuma responde", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ message: "Forbidden" }, 403)));
+    await expect(getEmpresa("30000000000100")).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("BrasilAPI respondeu 403"),
+    });
   });
 
   it("dá 404 quando nenhuma fonte conhece o CNPJ", async () => {
