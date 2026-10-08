@@ -8,13 +8,14 @@ import { buildRaioX, RaioXFailure } from "@/lib/server/raio-x";
 import { getEmpresa } from "@/lib/server/receita";
 
 /**
- * A Receita e o PNCP às vezes demoram; dá tempo para as reservas responderem
- * (pior caso: 2 × 7 s na Receita + 10 s na busca + 2 × 12 s na consulta).
+ * A Receita e o PNCP às vezes demoram; dá tempo para as reservas responderem.
+ * Pior caso: 2 × 7 s na Receita + 8 s na busca + 2 × 8 s na consulta = 38 s
+ * (a busca nacional só roda quando a regional deu certo: + 8 s).
  */
 export const maxDuration = 60;
 
-/** O mesmo CNPJ consultado de novo em 10 minutos reaproveita o resultado. */
-const cachedResult = memo<RaioXResult>(10 * 60 * 1000);
+/** O mesmo CNPJ consultado de novo em 10 minutos reaproveita o resultado (só se completo). */
+const cachedResult = memo<RaioXResult>(10 * 60 * 1000, 2000, (result) => !result.parcial);
 
 /** Limite simples por IP, para ninguém usar a rota para martelar as fontes públicas. */
 const WINDOW_MS = 60_000;

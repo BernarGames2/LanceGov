@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, LoaderCircle } from "lucide-react";
 
@@ -45,12 +45,16 @@ export function CnpjForm({
 
   const [value, setValue] = useState(() => formatCnpj(initialValue));
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(false);
+  // A navegação para /raio-x é uma transição: o botão fica ocupado até a página
+  // nova aparecer e volta sozinho se a URL for a mesma.
+  const [navigating, startNavigation] = useTransition();
+  const loading = fetching || navigating;
 
   // A home fica guardada (Activity) quando o visitante vai para /raio-x.
   // Ao esconder, volta o botão ao normal para quem retornar.
   useLayoutEffect(() => {
-    return () => setLoading(false);
+    return () => setFetching(false);
   }, []);
 
   useEffect(() => {
@@ -72,14 +76,15 @@ export function CnpjForm({
 
     const cnpj = cleanCnpj(value);
     setError(null);
-    setLoading(true);
+    setFetching(true);
     track("cnpj_submit", { origem, formato: /[A-Z]/.test(cnpj) ? "alfanumerico" : "numerico" });
 
     try {
       await fetchRaioX(cnpj, { retry: true });
-      router.push(`/raio-x?cnpj=${cnpj}`);
+      setFetching(false);
+      startNavigation(() => router.push(`/raio-x?cnpj=${cnpj}`));
     } catch (failure) {
-      setLoading(false);
+      setFetching(false);
       setError(
         failure instanceof RaioXError ? failure.message : "Não deu para fazer o Raio-X agora. Tente de novo em instantes.",
       );

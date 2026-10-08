@@ -6,6 +6,7 @@
  * As demais caem numa extração simples a partir da descrição do CNAE.
  */
 
+/** `terms` vazio = atividade que não diz o que a empresa vende (ex.: representante comercial). */
 type Rule = { prefix: string; terms: string[] };
 
 /** Prefixo do código CNAE (só dígitos). O prefixo mais longo vence. */
@@ -30,7 +31,7 @@ const RULES: Rule[] = [
   { prefix: "4752", terms: ["equipamentos de telefonia"] },
   { prefix: "9511", terms: ["manutenção de computadores", "equipamentos de informática"] },
   { prefix: "620", terms: ["software", "sistema de gestão"] },
-  { prefix: "6311", terms: ["hospedagem", "software"] },
+  { prefix: "6311", terms: ["hospedagem de sites", "computação em nuvem"] },
   { prefix: "6190", terms: ["internet", "link de dados"] },
   { prefix: "6110", terms: ["internet", "telefonia"] },
   // Saúde
@@ -45,21 +46,21 @@ const RULES: Rule[] = [
   { prefix: "8640202", terms: ["exames laboratoriais"] },
   { prefix: "8640", terms: ["exames", "diagnóstico por imagem"] },
   // Alimentação
-  { prefix: "5620", terms: ["fornecimento de refeições", "alimentação"] },
+  { prefix: "5620", terms: ["fornecimento de refeições", "marmitex"] },
   { prefix: "5611", terms: ["fornecimento de refeições", "lanches"] },
   { prefix: "4639", terms: ["gêneros alimentícios", "merenda escolar"] },
   { prefix: "4637", terms: ["gêneros alimentícios"] },
   { prefix: "4633", terms: ["hortifrutigranjeiros", "gêneros alimentícios"] },
-  { prefix: "4634", terms: ["carnes", "gêneros alimentícios"] },
+  { prefix: "4634", terms: ["carne", "gêneros alimentícios"] },
   { prefix: "4631", terms: ["laticínios", "gêneros alimentícios"] },
   { prefix: "4711", terms: ["gêneros alimentícios"] },
   { prefix: "4712", terms: ["gêneros alimentícios"] },
-  { prefix: "4721", terms: ["pães", "gêneros alimentícios"] },
-  { prefix: "4722", terms: ["carnes", "gêneros alimentícios"] },
+  { prefix: "4721", terms: ["pão", "gêneros alimentícios"] },
+  { prefix: "4722", terms: ["carne", "gêneros alimentícios"] },
   { prefix: "4724", terms: ["hortifrutigranjeiros"] },
   { prefix: "4729", terms: ["gêneros alimentícios"] },
   { prefix: "4723", terms: ["água mineral", "bebidas"] },
-  { prefix: "1091", terms: ["pães", "gêneros alimentícios"] },
+  { prefix: "1091", terms: ["pão", "gêneros alimentícios"] },
   // Vestuário e uniformes
   { prefix: "141", terms: ["uniformes", "fardamento"] },
   { prefix: "4642", terms: ["uniformes", "fardamento"] },
@@ -74,16 +75,16 @@ const RULES: Rule[] = [
   { prefix: "4753", terms: ["eletrodomésticos", "eletroeletrônicos"] },
   { prefix: "4757", terms: ["eletrodomésticos"] },
   // Construção, manutenção e materiais
-  { prefix: "412", terms: ["obra", "construção"] },
-  { prefix: "421", terms: ["pavimentação", "obra"] },
-  { prefix: "422", terms: ["obra", "saneamento"] },
-  { prefix: "429", terms: ["obra", "construção"] },
-  { prefix: "431", terms: ["terraplenagem", "obra"] },
+  { prefix: "412", terms: ["obras de engenharia", "construção"] },
+  { prefix: "421", terms: ["pavimentação", "obras de engenharia"] },
+  { prefix: "422", terms: ["obras de engenharia", "saneamento"] },
+  { prefix: "429", terms: ["obras de engenharia", "construção"] },
+  { prefix: "431", terms: ["terraplenagem", "demolição"] },
   { prefix: "4321", terms: ["instalações elétricas", "manutenção elétrica"] },
   { prefix: "4322", terms: ["manutenção hidráulica", "ar condicionado"] },
   { prefix: "4329", terms: ["manutenção predial"] },
   { prefix: "433", terms: ["reforma", "pintura"] },
-  { prefix: "439", terms: ["reforma", "obra"] },
+  { prefix: "439", terms: ["reforma", "obras de engenharia"] },
   { prefix: "8111", terms: ["manutenção predial"] },
   { prefix: "4744", terms: ["material de construção"] },
   { prefix: "4679", terms: ["material de construção"] },
@@ -101,8 +102,8 @@ const RULES: Rule[] = [
   { prefix: "4924", terms: ["transporte escolar"] },
   { prefix: "4929", terms: ["transporte"] },
   { prefix: "4930", terms: ["transporte", "frete"] },
-  { prefix: "4731", terms: ["combustível"] },
-  { prefix: "4681", terms: ["combustível"] },
+  { prefix: "4731", terms: ["combustíveis"] },
+  { prefix: "4681", terms: ["combustíveis"] },
   { prefix: "4732", terms: ["lubrificantes"] },
   // Segurança, eventos, comunicação e serviços
   { prefix: "8011", terms: ["vigilância", "segurança patrimonial"] },
@@ -117,23 +118,31 @@ const RULES: Rule[] = [
   { prefix: "7119", terms: ["topografia", "serviços de engenharia"] },
   { prefix: "8599", terms: ["capacitação", "curso"] },
   { prefix: "8593", terms: ["curso", "capacitação"] },
-  { prefix: "7810", terms: ["mão de obra", "terceirização"] },
+  { prefix: "7810", terms: ["recrutamento", "seleção de pessoal"] },
+  { prefix: "7830", terms: ["mão de obra terceirizada", "terceirização de serviços"] },
   { prefix: "7820", terms: ["mão de obra temporária"] },
   { prefix: "8211", terms: ["apoio administrativo"] },
-  { prefix: "8219", terms: ["cópias", "reprografia"] },
   // Meio ambiente e áreas verdes
   { prefix: "381", terms: ["coleta de resíduos", "resíduos sólidos"] },
   { prefix: "382", terms: ["resíduos sólidos", "destinação de resíduos"] },
   { prefix: "8130", terms: ["roçagem", "jardinagem"] },
   { prefix: "0161", terms: ["roçagem", "jardinagem"] },
   // Outros comuns
+  { prefix: "4541", terms: ["peças para motocicletas", "motocicletas"] },
+  { prefix: "4542", terms: ["peças para motocicletas"] },
+  // Atividades que não dizem o que a empresa vende: os termos vêm das outras.
+  { prefix: "461", terms: [] },
+  { prefix: "8299", terms: [] },
+  { prefix: "8219", terms: ["cópias", "reprografia"] },
+  { prefix: "7490104", terms: [] },
   { prefix: "4763601", terms: ["brinquedos", "material pedagógico"] },
   { prefix: "4763602", terms: ["material esportivo"] },
   { prefix: "4755", terms: ["tecidos", "cama mesa e banho"] },
   { prefix: "4759", terms: ["utensílios domésticos"] },
-  { prefix: "4789", terms: ["materiais diversos"] },
+  { prefix: "4789007", terms: ["material de escritório", "equipamentos de escritório"] },
+  { prefix: "4789004", terms: ["ração animal"] },
+  { prefix: "4789001", terms: ["artesanato"] },
   { prefix: "4686", terms: ["embalagens"] },
-  { prefix: "4689", terms: ["materiais diversos"] },
   { prefix: "3321", terms: ["manutenção de máquinas"] },
   { prefix: "3314", terms: ["manutenção de máquinas", "manutenção de equipamentos"] },
   { prefix: "9529", terms: ["manutenção de equipamentos"] },
@@ -152,6 +161,8 @@ const STOPWORDS = new Set(
     "artigos", "artigo", "mercadorias", "similares", "partes", "peças", "acessórios", "atacado", "varejo",
     "industrial", "comercial", "doméstico", "doméstica", "domésticos", "pessoal", "especializado",
     "especializada", "prestação", "representantes", "agentes", "intermediação", "fins", "terceiros",
+    "comerciais", "prestados", "principalmente", "empresas", "novos", "novas", "usados", "usadas", "negócios",
+    "agenciamento", "gestão", "fornecimento", "apoio", "sob", "encomenda", "outra", "classe", "itens",
   ].map(normalizeText),
 );
 
@@ -183,28 +194,32 @@ export function termsForCnae(code: string | number, descricao = ""): string[] {
 }
 
 /**
- * Termos de busca da empresa, da atividade principal para as secundárias,
- * sem repetição. Atividades sem código (0) são ignoradas.
+ * Termos de busca da empresa: até 2 da atividade principal (o que ela mais
+ * vende) e o resto das secundárias, na ordem, sem repetição. Atividades sem
+ * código (0) ou que não dizem o que a empresa vende são puladas.
  */
 export function searchTerms(cnaes: { codigo: string | number; descricao?: string }[], max = 3) {
   const terms: string[] = [];
   const seen = new Set<string>();
-  // Primeiro o termo principal de cada atividade, depois os complementares.
+  const add = (term: string | undefined) => {
+    if (!term || terms.length >= max) return;
+    const key = normalizeText(term);
+    if (seen.has(key)) return;
+    seen.add(key);
+    terms.push(term);
+  };
+
   const perCnae = cnaes
     .filter((cnae) => Number(String(cnae.codigo).replace(/\D/g, "")) > 0)
-    .map((cnae) => termsForCnae(cnae.codigo, cnae.descricao));
-  const rounds = Math.max(0, ...perCnae.map((list) => list.length));
-  for (let round = 0; round < rounds && terms.length < max; round++) {
-    for (const list of perCnae) {
-      const term = list[round];
-      if (!term) continue;
-      const key = normalizeText(term);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      terms.push(term);
-      if (terms.length >= max) break;
-    }
-  }
+    .map((cnae) => termsForCnae(cnae.codigo, cnae.descricao))
+    .filter((list) => list.length > 0);
+  if (perCnae.length === 0) return terms;
+
+  const [main, ...others] = perCnae;
+  main.slice(0, 2).forEach(add);
+  const rounds = Math.max(0, ...others.map((list) => list.length));
+  for (let round = 0; round < rounds; round++) others.forEach((list) => add(list[round]));
+  main.slice(2).forEach(add);
   return terms;
 }
 
@@ -215,9 +230,20 @@ export function termTokens(term: string) {
     .filter((token) => token.length >= 3 && !STOPWORDS.has(token));
 }
 
-/** O objeto da licitação menciona todas as palavras significativas do termo? */
+/**
+ * Raiz da palavra para tolerar plural e flexão ("combustível" × "combustíveis",
+ * "material" × "materiais"): tira as duas últimas letras de palavras longas.
+ */
+function stem(token: string) {
+  return token.length > 5 ? token.slice(0, -2) : token;
+}
+
+/**
+ * O objeto da licitação menciona todas as palavras significativas do termo?
+ * Compara pelo começo das palavras, para "curso" não casar com "recursos".
+ */
 export function matchesTerm(objeto: string, term: string) {
-  const text = normalizeText(objeto);
+  const words = normalizeText(objeto).split(/[^a-z0-9]+/).filter(Boolean);
   const tokens = termTokens(term);
-  return tokens.length > 0 && tokens.every((token) => text.includes(token));
+  return tokens.length > 0 && tokens.every((token) => words.some((word) => word.startsWith(stem(token))));
 }

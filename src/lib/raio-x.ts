@@ -60,8 +60,12 @@ export type RaioXResult = {
   oportunidades: Oportunidade[];
   /** Termos usados na busca, derivados dos CNAEs. */
   termos?: string[];
-  /** Onde a busca foi feita: a UF da empresa ou o Brasil todo. */
+  /** De onde são os números: a UF da empresa ou o Brasil todo. */
   abrangencia?: "uf" | "brasil";
+  /** A lista inclui licitações de outros estados para completar as da UF. */
+  complementoNacional?: boolean;
+  /** Parte da consulta ao PNCP falhou ou foi por amostra: os números podem estar incompletos. */
+  parcial?: boolean;
   consultadoEm?: string;
 };
 
@@ -84,8 +88,12 @@ const API_URL = process.env.NEXT_PUBLIC_RAIOX_API_URL || "/api/raio-x";
 
 const GENERIC_ERROR = "Não deu para fazer o Raio-X agora. Tente de novo em instantes.";
 
-const cache = new Map<string, Promise<RaioXResult>>();
-const failed = new Set<string>();
+type Entry = { promise: Promise<RaioXResult>; at: number; failed: boolean };
+
+const cache = new Map<string, Entry>();
+const attempts = new Map<string, number>();
+/** Depois disso o resultado é buscado de novo: licitações abrem e fecham. */
+const FRESH_MS = 10 * 60 * 1000;
 
 /**
  * Busca o Raio-X de um CNPJ. O resultado fica em memória para o formulário
@@ -95,25 +103,30 @@ const failed = new Set<string>();
  */
 export function fetchRaioX(cnpj: string, { retry = false } = {}): Promise<RaioXResult> {
   const key = cleanCnpj(cnpj);
-  if (retry && failed.has(key)) {
-    cache.delete(key);
-    failed.delete(key);
-  }
-  const cached = cache.get(key);
-  if (cached) return cached;
+  const entry = cache.get(key);
+  const stale = entry && !entry.failed && Date.now() - entry.at > FRESH_MS;
+  if (entry && !stale && !(retry && entry.failed)) return entry.promise;
 
-  const request = requestApi(API_URL, key).catch((error) => {
-    failed.add(key);
+  attempts.set(key, (attempts.get(key) ?? 0) + 1);
+  const next: Entry = { at: Date.now(), failed: false, promise: Promise.resolve(null as never) };
+  next.promise = requestApi(API_URL, key).catch((error) => {
+    next.failed = true;
     throw error;
   });
-  cache.set(key, request);
-  return request;
+  cache.set(key, next);
+  return next.promise;
+}
+
+/** Quantas vezes o CNPJ já foi buscado: muda a cada nova tentativa (chave da tela de erro). */
+export function raioXAttempt(cnpj: string) {
+  return attempts.get(cleanCnpj(cnpj)) ?? 0;
 }
 
 /** Libera nova tentativa para os CNPJs que falharam (botão "Tentar de novo"). */
 export function forgetRaioXFailures() {
-  for (const key of failed) cache.delete(key);
-  failed.clear();
+  for (const [key, entry] of cache) {
+    if (entry.failed) cache.delete(key);
+  }
 }
 
 async function requestApi(url: string, cnpj: string): Promise<RaioXResult> {

@@ -7,11 +7,12 @@ import { ArrowRight, Info, LoaderCircle, MessageCircle, TriangleAlert } from "lu
 
 import { CnpjForm } from "@/components/cnpj-form";
 import { OpportunityCard } from "@/components/opportunity-card";
+import { RaioXBoundary } from "@/components/raio-x-failure";
 import { buttonVariants } from "@/components/ui/button";
 import { track } from "@/lib/analytics";
 import { cleanCnpj, formatCnpj, isValidCnpj } from "@/lib/cnpj";
 import { formatBRLCompact, formatInteger } from "@/lib/format";
-import { fetchRaioX, type RaioXResult as Result } from "@/lib/raio-x";
+import { fetchRaioX, raioXAttempt, type Porte, type RaioXResult as Result } from "@/lib/raio-x";
 import { signupUrl } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
@@ -26,9 +27,11 @@ export function RaioXResult() {
 
   const cnpj = cleanCnpj(raw);
   return (
-    <Suspense fallback={<RaioXLoading />}>
-      <RaioXData key={cnpj} cnpj={cnpj} />
-    </Suspense>
+    <RaioXBoundary key={`${cnpj}:${raioXAttempt(cnpj)}`}>
+      <Suspense fallback={<RaioXLoading />}>
+        <RaioXData cnpj={cnpj} />
+      </Suspense>
+    </RaioXBoundary>
   );
 }
 
@@ -41,6 +44,14 @@ function RaioXData({ cnpj }: { cnpj: string }) {
 
   return <RaioXView result={result} />;
 }
+
+const porteLabel: Record<Porte, string> = {
+  MEI: "MEI",
+  ME: "Microempresa",
+  EPP: "Empresa de pequeno porte",
+  Demais: "Médio ou grande porte",
+  "Não informado": "Porte não informado",
+};
 
 const horaFormat = new Intl.DateTimeFormat("pt-BR", {
   hour: "2-digit",
@@ -59,7 +70,13 @@ function RaioXView({ result }: { result: Result }) {
       value: `${formatInteger(abertas.quantidade)}${abertas.haMais ? "+" : ""}`,
     },
     { label: "em valor estimado, somando as licitações encontradas", value: formatBRLCompact(abertas.valorTotal) },
-    { label: "de até R$ 80 mil, faixa reservada a ME/EPP", value: formatInteger(abertas.exclusivasMeEpp) },
+    {
+      label:
+        result.perfil.porte === "Demais"
+          ? "de até R$ 80 mil, reservadas a ME/EPP (sua empresa não disputa)"
+          : "de até R$ 80 mil, faixa reservada a ME/EPP",
+      value: formatInteger(abertas.exclusivasMeEpp),
+    },
     ...(result.ultimas4Semanas
       ? [
           {
@@ -92,7 +109,7 @@ function RaioXView({ result }: { result: Result }) {
       )}
       <p className="mt-3 max-w-3xl text-base text-grafite">
         CNAE <span className="numero text-tinta">{result.perfil.cnae}</span>
-        {result.perfil.descricaoCnae && <> · {result.perfil.descricaoCnae}</>} · Porte {result.perfil.porte}
+        {result.perfil.descricaoCnae && <> · {result.perfil.descricaoCnae}</>} · {porteLabel[result.perfil.porte]}
         {local && <> · {local}</>}
       </p>
 
@@ -100,6 +117,14 @@ function RaioXView({ result }: { result: Result }) {
         <p className="mt-6 flex max-w-3xl items-start gap-3 rounded-xl border border-risco/30 bg-risco/10 px-4 py-3 text-[15px] text-tinta">
           <TriangleAlert aria-hidden className="mt-0.5 size-5 shrink-0 text-risco-escuro" />
           Situação na Receita: {situacao}. Para participar de licitações a empresa precisa estar ativa.
+        </p>
+      )}
+
+      {result.parcial && (
+        <p className="mt-6 flex max-w-3xl items-start gap-3 rounded-xl border border-prazo/40 bg-prazo/15 px-4 py-3 text-[15px] text-tinta">
+          <Info aria-hidden className="mt-0.5 size-5 shrink-0" />
+          Parte da consulta ao PNCP não respondeu, então os números podem estar incompletos. Tente de novo
+          em alguns minutos.
         </p>
       )}
 
@@ -138,6 +163,12 @@ function RaioXView({ result }: { result: Result }) {
                 <p className="mt-3 flex items-start gap-2 text-[15px] text-grafite">
                   <Info aria-hidden className="mt-0.5 size-[18px] shrink-0" />
                   A Nota Lance (0 a 100) e a leitura completa do edital aparecem na conta grátis.
+                </p>
+              )}
+              {result.complementoNacional && (
+                <p className="mt-2 text-[15px] text-grafite">
+                  {empresa?.uf ? `Em ${empresa.uf}` : "Na sua UF"} apareceu pouca coisa agora, então a lista inclui
+                  licitações de outros estados. Os números acima contam só {empresa?.uf ?? "a sua UF"}.
                 </p>
               )}
               <ul className="mt-6 flex flex-col gap-4">

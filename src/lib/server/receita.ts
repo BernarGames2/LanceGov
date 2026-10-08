@@ -80,7 +80,8 @@ export function toEmpresa(cnpj: string, data: ReceitaJson): Empresa {
     cnpj,
     nome: titleCase(data.nome_fantasia?.trim() || data.razao_social?.trim() || "Empresa"),
     uf: data.uf?.trim().toUpperCase() || undefined,
-    municipio: data.municipio ? titleCase(data.municipio.trim()) : undefined,
+    // A Receita manda o município sem acento: fica como veio, em vez de "Sao Paulo".
+    municipio: data.municipio?.trim().toUpperCase() || undefined,
     porte: toPorte(data),
     situacao: data.descricao_situacao_cadastral?.trim() || undefined,
     cnaes,
@@ -97,17 +98,23 @@ function toPorte(data: ReceitaJson): Porte {
 }
 
 const LOWERCASE_WORDS = new Set(["de", "da", "do", "das", "dos", "e", "em"]);
-const UPPERCASE_WORDS = new Set(["ltda", "me", "epp", "eireli", "sa", "s/a", "mei"]);
+const UPPERCASE_WORDS = new Set(["ltda", "ltda.", "me", "epp", "eireli", "sa", "s/a", "s.a.", "mei"]);
 
-/** "DISTRIBUIDORA DE LIMPEZA SILVA LTDA" → "Distribuidora de Limpeza Silva LTDA". */
+/**
+ * "DISTRIBUIDORA DE LIMPEZA SILVA LTDA" → "Distribuidora de Limpeza Silva LTDA".
+ * Siglas com ponto ("J.R.") ou sem vogal ficam em caixa alta. O nome de MEI
+ * começa com o número do CNPJ ("12.345.678 JOAO DA SILVA"): esse número sai.
+ */
 export function titleCase(value: string) {
   return value
-    .toLowerCase()
+    .replace(/^\d{2}\.?\d{3}\.?\d{3}\s+/, "")
     .split(/\s+/)
     .map((word, index) => {
-      if (UPPERCASE_WORDS.has(word)) return word.toUpperCase();
-      if (index > 0 && LOWERCASE_WORDS.has(word)) return word;
-      return word.charAt(0).toUpperCase() + word.slice(1);
+      const lower = word.toLowerCase();
+      if (UPPERCASE_WORDS.has(lower)) return word.toUpperCase();
+      if (index > 0 && LOWERCASE_WORDS.has(lower)) return lower;
+      if (/\./.test(word) || !/[aeiouáéíóúâêôãõ]/i.test(word)) return word.toUpperCase();
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
     })
     .join(" ");
 }

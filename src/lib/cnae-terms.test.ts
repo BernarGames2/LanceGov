@@ -10,7 +10,10 @@ describe("CNAE → termos de busca", () => {
   it("usa os termos de compra das atividades conhecidas, preferindo o prefixo mais longo", () => {
     expect(termsForCnae(4649408)).toEqual(["material de limpeza", "produtos de higiene"]);
     expect(termsForCnae(4789005)).toEqual(["material de limpeza", "saneantes"]);
-    expect(termsForCnae(4789099)).toEqual(["materiais diversos"]);
+    // Atividade genérica sem termo próprio e sem descrição útil: nada (usa as outras).
+    expect(termsForCnae(4789099, "Comércio varejista de outros produtos não especificados anteriormente")).toEqual([]);
+    expect(termsForCnae(4619200)).toEqual([]);
+    expect(termsForCnae(4731800)).toEqual(["combustíveis"]);
     expect(termsForCnae(6201501)).toEqual(["software", "sistema de gestão"]);
   });
 
@@ -19,19 +22,26 @@ describe("CNAE → termos de busca", () => {
     expect(termsForCnae(9999999, "")).toEqual([]);
   });
 
-  it("intercala as atividades, ignora código zero e não repete termos", () => {
+  it("usa até 2 termos da atividade principal, depois as secundárias, sem repetir", () => {
     const terms = searchTerms([
       { codigo: 4649408 },
       { codigo: 0, descricao: "" },
       { codigo: 4761003 },
       { codigo: 4789005 },
     ]);
-    expect(terms).toEqual(["material de limpeza", "material de expediente", "produtos de higiene"]);
+    expect(terms).toEqual(["material de limpeza", "produtos de higiene", "material de expediente"]);
+    // Representante comercial não diz o que a empresa vende: pula para a próxima atividade.
+    expect(searchTerms([{ codigo: 4619200 }, { codigo: 4731800 }])).toEqual(["combustíveis"]);
   });
 
   it("confere o termo no objeto sem ligar para acento e caixa", () => {
     expect(matchesTerm("AQUISIÇÃO DE MATERIAL DE LIMPEZA", "material de limpeza")).toBe(true);
     expect(matchesTerm("Gêneros alimentícios para merenda", "generos alimenticios")).toBe(true);
     expect(matchesTerm("Transporte escolar", "material de limpeza")).toBe(false);
+    expect(matchesTerm("Aquisição de combustíveis (gasolina e diesel)", "combustíveis")).toBe(true);
+    expect(matchesTerm("Aquisição de combustível", "combustíveis")).toBe(true);
+    expect(matchesTerm("Fornecimento de mão de obra terceirizada", "obras de engenharia")).toBe(false);
+    expect(matchesTerm("Recursos humanos", "curso")).toBe(false);
+    expect(matchesTerm("Carne bovina", "carne")).toBe(true);
   });
 });

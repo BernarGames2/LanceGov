@@ -9,37 +9,62 @@ import { getJson, memo, SourceError } from "./http";
  *    encontra direto os editais com os termos da empresa.
  * 2. Se a busca falhar, a API oficial de consulta
  *    (/api/consulta/v1/contratacoes/proposta), que não filtra por texto:
- *    baixa as contratações com propostas abertas da UF e filtra aqui.
+ *    baixa uma amostra das contratações abertas da UF e filtra aqui.
  *
  * Os dois formatos são lidos com tolerância (campos opcionais), porque o
- * PNCP muda e às vezes ignora filtros sem avisar.
+ * PNCP muda e às vezes ignora filtros sem avisar. Todo resultado é conferido
+ * contra o termo antes de ser mostrado.
  */
 
 const BASE = "https://pncp.gov.br";
-const SEARCH_TIMEOUT_MS = 10_000;
-const CONSULTA_TIMEOUT_MS = 12_000;
+const SEARCH_TIMEOUT_MS = 8000;
+const CONSULTA_TIMEOUT_MS = 8000;
+const SEARCH_PAGE_SIZE = 50;
 
 export type SearchResult = {
   items: Oportunidade[];
-  /** Quantas o PNCP diz que existem para a busca (pode ser maior que items). */
-  total: number;
+  /** Provavelmente existem mais resultados do que os trazidos. */
+  haMais: boolean;
+  /** A resposta veio incompleta (reserva por amostra ou páginas que falharam). */
+  partial: boolean;
 };
 
-/** Resultados de busca mudam ao longo do dia: guarda por 10 minutos. */
-const cachedSearch = memo<SearchResult>(10 * 60 * 1000);
-const cachedPool = memo<Oportunidade[]>(10 * 60 * 1000, 60);
+/** Resultados completos ficam guardados 10 minutos; parciais, não. */
+const cachedSearch = memo<SearchResult>(10 * 60 * 1000, 500, (result) => !result.partial);
+const cachedPool = memo<Pool>(10 * 60 * 1000, 60, (pool) => !pool.failedPages);
 
-/** Licitações abertas que mencionam `term`, na UF (ou no Brasil todo sem UF). */
-export function searchOpen(term: string, uf?: string, size = 20): Promise<SearchResult> {
-  return cachedSearch(`${term}|${uf ?? "BR"}|${size}`, async () => {
+/**
+ * O PNCP limita rajadas (429). Depois de um 429, não insiste no mesmo
+ * servidor por um minuto: responde rápido que está ocupado.
+ */
+const BUSY_MS = 60_000;
+let busyUntil = 0;
+
+async function pncpJson<T>(source: string, url: string, timeoutMs: number) {
+  if (Date.now() < busyUntil) throw new SourceError(source, 429, `${source}: ocupado (429 recente)`);
+  try {
+    return await getJson<T>(source, url, timeoutMs);
+  } catch (error) {
+    if (error instanceof SourceError && error.status === 429) busyUntil = Date.now() + BUSY_MS;
+    throw error;
+  }
+}
+
+/**
+ * Licitações abertas que mencionam `term`, na UF (ou no Brasil todo sem UF).
+ * `fallback: false` não usa a API de consulta se a busca falhar.
+ */
+export function searchOpen(term: string, uf?: string, { fallback = true } = {}): Promise<SearchResult> {
+  return cachedSearch(`${term}|${uf ?? "BR"}|${fallback}`, async () => {
     try {
-      return await searchPortal(term, uf, size);
+      return await searchPortal(term, uf);
     } catch (error) {
-      if (!(error instanceof SourceError)) throw error;
+      // Sem reserva, ou com o PNCP limitando pedidos: a reserva bate no mesmo servidor.
+      if (!fallback || !(error instanceof SourceError) || error.status === 429) throw error;
       console.warn(`[raio-x] busca do PNCP falhou (${error.message}); usando a API de consulta`);
       const pool = await openPool(uf);
-      const items = pool.filter((item) => matchesTerm(item.objeto, term));
-      return { items: items.slice(0, size), total: items.length };
+      const items = pool.items.filter((item) => matchesTerm(item.objeto, term));
+      return { items, haMais: pool.truncated, partial: true };
     }
   });
 }
@@ -54,32 +79,40 @@ type SearchJson = {
   total?: number | string;
 };
 
-async function searchPortal(term: string, uf: string | undefined, size: number): Promise<SearchResult> {
+async function searchPortal(term: string, uf: string | undefined): Promise<SearchResult> {
   const params = new URLSearchParams({
     q: term,
     tipos_documento: "edital",
     ordenacao: "-data",
     pagina: "1",
-    tam_pagina: String(size),
+    tam_pagina: String(SEARCH_PAGE_SIZE),
     status: "recebendo_proposta",
   });
   if (uf) params.set("ufs", uf);
 
-  const json = await getJson<SearchJson>("PNCP (busca)", `${BASE}/api/search/?${params}`, SEARCH_TIMEOUT_MS);
-  if (json === null) return { items: [], total: 0 };
+  const json = await pncpJson<SearchJson>("PNCP (busca)", `${BASE}/api/search/?${params}`, SEARCH_TIMEOUT_MS);
+  if (json === null) return { items: [], haMais: false, partial: false };
 
   const raw = Array.isArray(json.items) ? json.items : Array.isArray(json.data) ? json.data : null;
   if (!raw) {
     throw new SourceError("PNCP (busca)", 200, `formato inesperado: ${Object.keys(json).join(", ")}`);
   }
-
-  const items = raw.map((item) => fromSearchItem(item)).filter((item): item is Oportunidade => item !== null);
-  if (raw.length > 0 && items.length === 0 && !raw.some(looksReadable)) {
+  if (raw.length > 0 && !raw.some(looksReadable)) {
     // Veio resultado, mas em campos que não conhecemos: melhor usar a API oficial.
     throw new SourceError("PNCP (busca)", 200, `campos desconhecidos: ${Object.keys(raw[0]).join(", ")}`);
   }
+
+  // A busca é por relevância de palavras soltas: "material de limpeza" também
+  // traz "material de construção". Fica só o que menciona o termo inteiro.
+  const items = raw
+    .filter((item) => matchesTerm(`${text(item.description) ?? ""} ${text(item.title) ?? ""} ${text(item.objeto) ?? ""}`, term))
+    .map((item) => fromSearchItem(item))
+    .filter((item): item is Oportunidade => item !== null);
+
+  // Há mais páginas e a maior parte desta página era do assunto: deve haver mais.
   const total = Number(json.total);
-  return { items, total: Number.isFinite(total) && total > 0 ? total : items.length };
+  const haMais = Number.isFinite(total) && total > raw.length && items.length >= raw.length / 2;
+  return { items, haMais, partial: false };
 }
 
 /** O item tem os campos que sabemos ler (mesmo que esteja vencido ou cancelado)? */
@@ -138,13 +171,21 @@ type ConsultaJson = {
   totalPaginas?: number;
 };
 
-/** Pregão eletrônico (6) e dispensa (8): as modalidades em que a pequena empresa mais vende. */
-const MODALIDADES = [6, 8];
-const PAGES = 3;
+type Pool = {
+  items: Oportunidade[];
+  /** Há mais páginas do que as baixadas: a amostra não cobre tudo. */
+  truncated: boolean;
+  /** Alguma página falhou. */
+  failedPages: boolean;
+};
+
+/** Pregão eletrônico (6), dispensa (8) e concorrência eletrônica (4). */
+const MODALIDADES = [6, 8, 4];
+const PAGES = 2;
 const PAGE_SIZE = 50;
 
-/** Contratações com propostas abertas nos próximos 60 dias, da UF (ou do Brasil). */
-function openPool(uf?: string): Promise<Oportunidade[]> {
+/** Amostra das contratações com propostas abertas nos próximos 60 dias, da UF (ou do Brasil). */
+function openPool(uf?: string): Promise<Pool> {
   return cachedPool(uf ?? "BR", async () => {
     const dataFinal = yyyymmdd(new Date(Date.now() + 60 * 24 * 60 * 60 * 1000));
     const page = (modalidade: number, pagina: number) => {
@@ -155,7 +196,7 @@ function openPool(uf?: string): Promise<Oportunidade[]> {
         tamanhoPagina: String(PAGE_SIZE),
       });
       if (uf) params.set("uf", uf);
-      return getJson<ConsultaJson>(
+      return pncpJson<ConsultaJson>(
         "PNCP (consulta)",
         `${BASE}/api/consulta/v1/contratacoes/proposta?${params}`,
         CONSULTA_TIMEOUT_MS,
@@ -163,13 +204,17 @@ function openPool(uf?: string): Promise<Oportunidade[]> {
     };
 
     // Primeira página de cada modalidade; as seguintes só se existirem.
+    let truncated = false;
+    let failedPages = false;
     const results = await Promise.allSettled(
       MODALIDADES.map(async (modalidade) => {
         const first = await page(modalidade, 1);
-        const pages = Math.min(PAGES, Number(first?.totalPaginas) || 1);
+        const totalPaginas = Number(first?.totalPaginas) || 1;
+        if (totalPaginas > PAGES) truncated = true;
         const rest = await Promise.allSettled(
-          Array.from({ length: pages - 1 }, (_, index) => page(modalidade, index + 2)),
+          Array.from({ length: Math.min(PAGES, totalPaginas) - 1 }, (_, index) => page(modalidade, index + 2)),
         );
+        if (rest.some((r) => r.status === "rejected")) failedPages = true;
         return [first, ...rest.map((r) => (r.status === "fulfilled" ? r.value : null))];
       }),
     );
@@ -179,6 +224,7 @@ function openPool(uf?: string): Promise<Oportunidade[]> {
       const first = results[0];
       throw first.status === "rejected" ? first.reason : new SourceError("PNCP (consulta)", 0, "sem resposta");
     }
+    if (ok.length < results.length) failedPages = true;
 
     const byId = new Map<string, Oportunidade>();
     for (const json of ok.flatMap((result) => result.value)) {
@@ -187,7 +233,7 @@ function openPool(uf?: string): Promise<Oportunidade[]> {
         if (item && !byId.has(item.id)) byId.set(item.id, item);
       }
     }
-    return [...byId.values()];
+    return { items: [...byId.values()], truncated, failedPages };
   });
 }
 
@@ -268,12 +314,25 @@ function cleanObjeto(value: string) {
 
 const SMALL_WORDS = new Set(["de", "da", "do", "das", "dos", "e", "em", "na", "no"]);
 
-/** "MUNICIPIO DE SAO JOSE" → "Municipio de Sao Jose" (o PNCP manda tudo em caixa alta). */
-function titleOrgao(value: string) {
+/**
+ * "MUNICIPIO DE SAO JOSE" → "Municipio de Sao Jose" (o PNCP manda muito nome
+ * em caixa alta). Siglas sem vogal, com ponto ou com número ficam em caixa alta.
+ */
+export function titleOrgao(value: string) {
   if (value !== value.toUpperCase()) return value;
+  const word = (part: string, first: boolean) => {
+    const lower = part.toLowerCase();
+    if (!first && SMALL_WORDS.has(lower)) return lower;
+    if (part.includes(".") || !/[AEIOUÁÉÍÓÚÂÊÔÃÕ]/.test(part) || /\d/.test(part)) return part;
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+  };
   return value
-    .toLowerCase()
     .split(/\s+/)
-    .map((word, index) => (index > 0 && SMALL_WORDS.has(word) ? word : word.charAt(0).toUpperCase() + word.slice(1)))
+    .map((token, index) =>
+      token
+        .split("/")
+        .map((part, partIndex) => word(part, index === 0 && partIndex === 0))
+        .join("/"),
+    )
     .join(" ");
 }

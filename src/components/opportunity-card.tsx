@@ -14,16 +14,22 @@ const participacaoLabel: Record<Participacao, string> = {
 
 const SAO_PAULO = "America/Sao_Paulo";
 const dayFormat = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", timeZone: SAO_PAULO });
+const timeFormat = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: SAO_PAULO });
 const isoDay = new Intl.DateTimeFormat("en-CA", { timeZone: SAO_PAULO });
 
-/** "Propostas até 20/10 (em 12 dias)", contando dias do calendário de Brasília. */
+/**
+ * "Propostas até 20/10 às 9h (em 12 dias)", contando dias do calendário de
+ * Brasília. O horário importa: a sessão costuma abrir de manhã.
+ */
 export function prazoLabel(encerramento: string, now = new Date()) {
   const end = new Date(encerramento);
-  const days = Math.round(
-    (Date.parse(isoDay.format(end)) - Date.parse(isoDay.format(now))) / 86_400_000,
-  );
+  if (end.getTime() < now.getTime()) return "Prazo encerrado";
+  const days = Math.round((Date.parse(isoDay.format(end)) - Date.parse(isoDay.format(now))) / 86_400_000);
   const quando = days <= 0 ? "hoje" : days === 1 ? "amanhã" : `em ${days} dias`;
-  return `Propostas até ${dayFormat.format(end)} (${quando})`;
+  const [hour, minute] = timeFormat.format(end).split(":");
+  // 23:59 = o PNCP só informou o dia.
+  const hora = hour === "23" && minute === "59" ? "" : ` às ${Number(hour)}h${minute === "00" ? "" : minute}`;
+  return `Propostas até ${dayFormat.format(end)}${hora} (${quando})`;
 }
 
 export function OpportunityCard({
@@ -90,7 +96,7 @@ export function OpportunityCard({
             Sessão em <span className="numero">{o.diasParaSessao}</span> dias
           </Badge>
         ) : o.encerramento ? (
-          <Badge variant="prazo">
+          <Badge variant={new Date(o.encerramento) < new Date() ? "risco" : "prazo"}>
             <CalendarClock aria-hidden />
             {prazoLabel(o.encerramento)}
           </Badge>

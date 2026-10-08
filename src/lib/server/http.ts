@@ -46,7 +46,7 @@ type Entry<T> = { value: Promise<T>; expires: number };
  * Cache em memória por instância do servidor. Guarda só resultados que deram
  * certo, para uma falha passageira não ficar presa no cache.
  */
-export function memo<T>(ttlMs: number, maxEntries = 500) {
+export function memo<T>(ttlMs: number, maxEntries = 500, keep: (value: T) => boolean = () => true) {
   const store = new Map<string, Entry<T>>();
   return (key: string, load: () => Promise<T>): Promise<T> => {
     const now = Date.now();
@@ -54,8 +54,13 @@ export function memo<T>(ttlMs: number, maxEntries = 500) {
     if (hit && hit.expires > now) return hit.value;
 
     const value = load();
-    store.set(key, { value, expires: now + ttlMs });
-    value.catch(() => store.delete(key));
+    const entry = { value, expires: now + ttlMs };
+    store.set(key, entry);
+    const forget = () => {
+      if (store.get(key) === entry) store.delete(key);
+    };
+    // Falhas e resultados parciais não ficam guardados.
+    value.then((result) => keep(result) || forget(), forget);
     if (store.size > maxEntries) {
       const oldest = store.keys().next().value;
       if (oldest !== undefined) store.delete(oldest);

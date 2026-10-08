@@ -17,17 +17,18 @@ export class RaioXFailure extends Error {
 
 export type RaioXDeps = {
   getEmpresa: (cnpj: string) => Promise<Empresa>;
-  searchOpen: (term: string, uf?: string, size?: number) => Promise<SearchResult>;
+  searchOpen: (term: string, uf?: string, options?: { fallback?: boolean }) => Promise<SearchResult>;
 };
 
-const PER_TERM = 20;
 const TOP = 5;
-/** Com menos que isso na UF, completa com o Brasil todo. */
+/** Com menos que isso na UF, a lista é completada com outros estados. */
 const MIN_REGIONAL = 5;
 
 export const MESSAGES = {
   naoEncontrado:
-    "Não encontramos esse CNPJ na base pública da Receita. Confira os números; CNPJs abertos há poucos dias podem demorar para aparecer.",
+    "Não encontramos esse CNPJ na base pública da Receita. Confira o CNPJ digitado; empresas abertas nas últimas semanas podem ainda não aparecer, porque essa base é atualizada uma vez por mês.",
+  naoEncontradoAlfanumerico:
+    "Não encontramos esse CNPJ na base pública da Receita. Os CNPJs com letras são novos e podem ainda não estar nessa base, que é atualizada uma vez por mês.",
   receitaFora: "A consulta à Receita não respondeu agora. Tente de novo em instantes.",
   pncpFora: "O PNCP, portal oficial das licitações, não respondeu agora. Tente de novo em alguns minutos.",
 } as const;
@@ -38,14 +39,16 @@ export async function buildRaioX(cnpj: string, deps: RaioXDeps, now = new Date()
   try {
     empresa = await deps.getEmpresa(cnpj);
   } catch (error) {
-    if (error instanceof SourceError && error.status === 404) throw new RaioXFailure(404, MESSAGES.naoEncontrado);
+    if (error instanceof SourceError && error.status === 404) {
+      throw new RaioXFailure(404, /[A-Z]/.test(cnpj) ? MESSAGES.naoEncontradoAlfanumerico : MESSAGES.naoEncontrado);
+    }
     console.error("[raio-x] Receita:", error);
     throw new RaioXFailure(502, MESSAGES.receitaFora);
   }
 
   const termos = searchTerms(empresa.cnaes, 3);
   const principal = empresa.cnaes[0];
-  const base: RaioXResult = {
+  const result: RaioXResult = {
     cnpj,
     exemplo: false,
     empresa: { nome: empresa.nome, uf: empresa.uf, municipio: empresa.municipio, situacao: empresa.situacao },
@@ -61,55 +64,77 @@ export async function buildRaioX(cnpj: string, deps: RaioXDeps, now = new Date()
     abrangencia: empresa.uf ? "uf" : "brasil",
     consultadoEm: now.toISOString(),
   };
-  if (termos.length === 0) return base;
+  if (termos.length === 0) return result;
 
-  // Primeiro na UF da empresa; se vier pouco, completa com o Brasil todo.
-  const regional = await Promise.allSettled(termos.map((term) => deps.searchOpen(term, empresa.uf, PER_TERM)));
-  let settled = regional;
-  let found = collect(regional);
-
-  if (empresa.uf && found.items.length < MIN_REGIONAL) {
-    const national = await Promise.allSettled(termos.slice(0, 2).map((term) => deps.searchOpen(term, undefined, PER_TERM)));
-    settled = [...regional, ...national];
-    found = collect(settled);
-    if (found.items.length > 0 && !found.items.some((item) => item.uf === empresa.uf)) {
-      base.abrangencia = "brasil";
-    }
-  }
-
-  if (settled.every((result) => result.status === "rejected")) {
-    const first = settled[0];
+  // 1. Na UF da empresa (ou no Brasil, se a Receita não informou a UF).
+  const regional = await Promise.allSettled(termos.map((term) => deps.searchOpen(term, empresa.uf)));
+  if (regional.every((settled) => settled.status === "rejected")) {
+    const first = regional[0];
     console.error("[raio-x] PNCP:", first.status === "rejected" ? first.reason : first);
     throw new RaioXFailure(502, MESSAGES.pncpFora);
   }
+  const fromRegion = collect(regional);
+  // O PNCP às vezes ignora o filtro de UF: os números contam só a UF da empresa.
+  const regionalItems = fromRegion.items.filter((item) => !empresa.uf || !item.uf || item.uf === empresa.uf);
+  let partial = fromRegion.partial || regional.some((settled) => settled.status === "rejected");
 
-  const items = found.items.filter((item) => !item.encerramento || new Date(item.encerramento) >= now);
-  const ranked = rank(items, empresa, now);
+  // 2. Pouca coisa na UF: completa a lista com o Brasil todo, sem reserva
+  //    (se a busca já está falhando, não vale insistir no PNCP).
+  let nationalItems: Oportunidade[] = [];
+  let nationalHaMais = false;
+  const nationalRan = Boolean(empresa.uf) && regionalItems.length < MIN_REGIONAL && !partial;
+  if (nationalRan) {
+    const national = await Promise.allSettled(
+      termos.slice(0, 2).map((term) => deps.searchOpen(term, undefined, { fallback: false })),
+    );
+    const fromBrasil = collect(national);
+    const known = new Set(regionalItems.map((item) => item.id));
+    nationalItems = fromBrasil.items.filter((item) => !known.has(item.id) && item.uf !== empresa.uf);
+    nationalHaMais = fromBrasil.haMais;
+    if (national.some((settled) => settled.status === "rejected")) partial = true;
+  }
 
-  return {
-    ...base,
-    abertas: {
-      quantidade: items.length,
-      haMais: found.haMais,
-      valorTotal: items.reduce((sum, item) => sum + (item.valor ?? 0), 0),
-      exclusivasMeEpp: items.filter((item) => item.faixaMeEpp).length,
-    },
-    oportunidades: ranked.slice(0, TOP),
+  // Empresa grande não disputa a faixa reservada a ME/EPP.
+  const podeFaixa = empresa.porte !== "Demais";
+  const eligible = (items: Oportunidade[]) =>
+    items.filter((item) => !item.encerramento || new Date(item.encerramento) >= now).filter((item) => podeFaixa || !item.faixaMeEpp);
+  const open = (items: Oportunidade[]) => items.filter((item) => !item.encerramento || new Date(item.encerramento) >= now);
+
+  // Os números falam de um lugar só: a UF, ou o Brasil quando a UF não teve nada.
+  const useRegion = regionalItems.length > 0 || !nationalRan;
+  const scope = useRegion ? regionalItems : nationalItems;
+  result.abrangencia = empresa.uf && useRegion ? "uf" : "brasil";
+
+  const counted = eligible(scope);
+  result.abertas = {
+    quantidade: counted.length,
+    haMais: useRegion ? fromRegion.haMais : nationalHaMais,
+    valorTotal: counted.reduce((sum, item) => sum + (item.valor ?? 0), 0),
+    exclusivasMeEpp: open(scope).filter((item) => item.faixaMeEpp).length,
   };
+
+  const list = rank(eligible(regionalItems), empresa, now);
+  if (list.length < TOP) list.push(...rank(eligible(nationalItems), empresa, now));
+  result.oportunidades = list.slice(0, TOP);
+  result.complementoNacional = useRegion && Boolean(empresa.uf) && result.oportunidades.some((item) => item.uf !== empresa.uf);
+  if (partial) result.parcial = true;
+  return result;
 }
 
 /** Junta os resultados de várias buscas, sem repetir licitação. */
 function collect(results: PromiseSettledResult<SearchResult>[]) {
   const byId = new Map<string, Oportunidade>();
   let haMais = false;
+  let partial = false;
   for (const result of results) {
     if (result.status !== "fulfilled") continue;
-    if (result.value.total > result.value.items.length) haMais = true;
+    if (result.value.haMais) haMais = true;
+    if (result.value.partial) partial = true;
     for (const item of result.value.items) {
       if (!byId.has(item.id)) byId.set(item.id, item);
     }
   }
-  return { items: [...byId.values()], haMais };
+  return { items: [...byId.values()], haMais, partial };
 }
 
 /**
