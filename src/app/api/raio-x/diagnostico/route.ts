@@ -39,8 +39,11 @@ export async function GET(request: Request) {
   const cnpj = cleanCnpj(raw);
   if (!isValidCnpj(cnpj)) return pretty({ erro: "CNPJ inválido" }, 400);
 
-  const [receita, busca, consulta] = await Promise.all([
-    lookupEmpresa(cnpj, { hedgeMs: 0, waitAll: true }),
+  const dataFinal = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10).replace(/-/g, "");
+  const receitaPromise = lookupEmpresa(cnpj, { hedgeMs: 0, waitAll: true });
+
+  const [receita, busca, buscaComoNavegador, consulta, consultaMunicipio] = await Promise.all([
+    receitaPromise,
     probe("PNCP busca", `https://pncp.gov.br/api/search/?${new URLSearchParams({
       q: "material de limpeza",
       tipos_documento: "edital",
@@ -59,8 +62,9 @@ export async function GET(request: Request) {
         amostra: Object.fromEntries(PROBE_FIELDS.map((key) => [key, first[key] ?? null])),
       };
     }),
+    browserLikeSearch(),
     probe("PNCP consulta", `https://pncp.gov.br/api/consulta/v1/contratacoes/proposta?${new URLSearchParams({
-      dataFinal: new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10).replace(/-/g, ""),
+      dataFinal,
       codigoModalidadeContratacao: "6",
       pagina: "1",
       tamanhoPagina: "10",
@@ -72,6 +76,18 @@ export async function GET(request: Request) {
         camposDoPrimeiroItem: Object.keys(data?.[0] ?? {}),
       };
     }),
+    // Licitações do município da empresa (o caminho principal do Raio-X).
+    receitaPromise.then((result): Promise<Record<string, unknown>> | Record<string, unknown> => {
+      const ibge = result.empresa?.codigoMunicipioIbge;
+      if (!ibge) return { ok: false, erro: "nenhuma fonte da Receita informou o código IBGE do município" };
+      return probe("PNCP consulta (município)", `https://pncp.gov.br/api/consulta/v1/contratacoes/proposta?${new URLSearchParams({
+        dataFinal,
+        codigoModalidadeContratacao: "6",
+        codigoMunicipioIbge: ibge,
+        pagina: "1",
+        tamanhoPagina: "10",
+      })}`, (json) => ({ codigoMunicipioIbge: ibge, totalRegistros: json.totalRegistros, totalPaginas: json.totalPaginas }));
+    }),
   ]);
 
   return pretty({
@@ -79,16 +95,27 @@ export async function GET(request: Request) {
     cnpj,
     receita: {
       encontrada: receita.empresa
-        ? { nome: receita.empresa.nome, uf: receita.empresa.uf, cnaes: receita.empresa.cnaes.length, porte: receita.empresa.porte }
+        ? {
+            nome: receita.empresa.nome,
+            uf: receita.empresa.uf,
+            municipio: receita.empresa.municipio,
+            codigoMunicipioIbge: receita.empresa.codigoMunicipioIbge ?? null,
+            cnaes: receita.empresa.cnaes,
+            porte: receita.empresa.porte,
+          }
         : null,
       naoEncontrado: receita.naoEncontrado,
       fontes: receita.outcomes,
     },
-    pncp: { busca, consulta },
+    pncp: { busca, buscaComoNavegador, consulta, consultaMunicipio },
   });
 }
 
-async function probe(fonte: string, url: string, summarize: (json: Record<string, unknown>) => unknown) {
+async function probe(
+  fonte: string,
+  url: string,
+  summarize: (json: Record<string, unknown>) => unknown,
+): Promise<Record<string, unknown>> {
   const began = Date.now();
   try {
     const json = await getJson<Record<string, unknown>>(fonte, url, 12_000);
@@ -100,6 +127,37 @@ async function probe(fonte: string, url: string, summarize: (json: Record<string
       status: error instanceof SourceError ? error.status : 0,
       erro: error instanceof Error ? error.message : String(error),
     };
+  }
+}
+
+/** A busca do portal derruba a conexão vinda do servidor; vale ver se aceita cabeçalhos de navegador. */
+async function browserLikeSearch() {
+  const began = Date.now();
+  const url = `https://pncp.gov.br/api/search/?${new URLSearchParams({
+    q: "material de limpeza",
+    tipos_documento: "edital",
+    ordenacao: "-data",
+    pagina: "1",
+    tam_pagina: "3",
+    status: "recebendo_proposta",
+  })}`;
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Accept: "application/json, text/plain, */*",
+        "Accept-Language": "pt-BR,pt;q=0.9",
+        Referer: "https://pncp.gov.br/app/editais",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+      },
+      signal: AbortSignal.timeout(12_000),
+      cache: "no-store",
+    });
+    const text = await response.text();
+    return { ok: response.ok, status: response.status, ms: Date.now() - began, inicio: text.slice(0, 200) };
+  } catch (error) {
+    const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : "";
+    return { ok: false, ms: Date.now() - began, erro: `${error instanceof Error ? error.message : error} ${cause}`.trim() };
   }
 }
 

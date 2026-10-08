@@ -6,6 +6,8 @@ export type Empresa = {
   nome: string;
   uf?: string;
   municipio?: string;
+  /** Código IBGE do município (7 dígitos), para buscar as licitações da cidade. */
+  codigoMunicipioIbge?: string;
   porte: Porte;
   situacao?: string;
   cnaes: { codigo: string; descricao: string }[];
@@ -27,16 +29,18 @@ type Provider = {
  * às vezes saem do ar ou barram servidores na nuvem, por isso são várias.
  */
 export const PROVIDERS: Provider[] = [
-  { name: "BrasilAPI", url: (cnpj) => `https://brasilapi.com.br/api/cnpj/v1/${cnpj}`, parse: fromBrasilApi },
+  // Ordem pelo que respondeu na Vercel (out/2026): CNPJá, CNPJ.ws e ReceitaWS em ~0,2 s;
+  // BrasilAPI e Minha Receita com erro 500/503 e ~5 s.
   { name: "CNPJá", url: (cnpj) => `https://open.cnpja.com/office/${cnpj}`, parse: fromCnpja },
-  { name: "Minha Receita", url: (cnpj) => `https://minhareceita.org/${cnpj}`, parse: fromBrasilApi },
   { name: "CNPJ.ws", url: (cnpj) => `https://publica.cnpj.ws/cnpj/${cnpj}`, parse: fromCnpjWs },
   { name: "ReceitaWS", url: (cnpj) => `https://receitaws.com.br/v1/cnpj/${cnpj}`, parse: fromReceitaWs },
+  { name: "BrasilAPI", url: (cnpj) => `https://brasilapi.com.br/api/cnpj/v1/${cnpj}`, parse: fromBrasilApi },
+  { name: "Minha Receita", url: (cnpj) => `https://minhareceita.org/${cnpj}`, parse: fromBrasilApi },
 ];
 
 const TIMEOUT_MS = 8000;
 /** A primeira fonte sai sozinha; se não responder nesse tempo, as outras entram juntas. */
-const HEDGE_MS = 1500;
+const HEDGE_MS = 1200;
 
 /** Dados cadastrais mudam pouco: guarda por 12 horas. */
 const cached = memo<Empresa>(12 * 60 * 60 * 1000);
@@ -150,6 +154,7 @@ export function fromBrasilApi(cnpj: string, data: Json): Parsed {
     nome: str(data.nome_fantasia) ?? str(data.razao_social),
     uf: str(data.uf),
     municipio: str(data.municipio),
+    codigoMunicipioIbge: ibge(data.codigo_municipio_ibge),
     porte: toPorte(str(data.porte), data.opcao_pelo_mei === true),
     situacao: str(data.descricao_situacao_cadastral),
     cnaes,
@@ -173,6 +178,7 @@ export function fromCnpja(cnpj: string, data: Json): Parsed {
     nome: str(data.alias) ?? str(company.name),
     uf: str(address.state),
     municipio: str(address.city),
+    codigoMunicipioIbge: ibge(address.municipality),
     porte: toPorte(str(size.acronym) ?? str(size.text), obj(company.simei).optant === true),
     situacao: str(obj(data.status).text),
     cnaes,
@@ -195,6 +201,7 @@ export function fromCnpjWs(cnpj: string, data: Json): Parsed {
     nome: str(est.nome_fantasia) ?? str(data.razao_social),
     uf: str(obj(est.estado).sigla),
     municipio: str(obj(est.cidade).nome),
+    codigoMunicipioIbge: ibge(obj(est.cidade).ibge_id),
     porte: toPorte(str(obj(data.porte).descricao), /^sim$/i.test(str(obj(data.simples).mei) ?? "")),
     situacao: str(est.situacao_cadastral),
     cnaes,
@@ -227,9 +234,23 @@ export function fromReceitaWs(cnpj: string, data: Json): Parsed {
   });
 }
 
+/** Código IBGE de município tem 7 dígitos. */
+function ibge(value: unknown) {
+  const code = digits(value);
+  return code.length === 7 ? code : undefined;
+}
+
 function empresaFrom(
   cnpj: string,
-  data: { nome?: string; uf?: string; municipio?: string; porte: Porte; situacao?: string; cnaes: Empresa["cnaes"] },
+  data: {
+    nome?: string;
+    uf?: string;
+    municipio?: string;
+    codigoMunicipioIbge?: string;
+    porte: Porte;
+    situacao?: string;
+    cnaes: Empresa["cnaes"];
+  },
 ): Empresa {
   return {
     cnpj,
@@ -237,6 +258,7 @@ function empresaFrom(
     uf: data.uf?.toUpperCase(),
     // Algumas fontes mandam o município sem acento: fica em caixa alta, em vez de "Sao Paulo".
     municipio: data.municipio?.toUpperCase(),
+    codigoMunicipioIbge: data.codigoMunicipioIbge,
     porte: data.porte,
     situacao: data.situacao?.toUpperCase(),
     cnaes: data.cnaes,

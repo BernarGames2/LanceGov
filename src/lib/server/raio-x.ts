@@ -1,7 +1,7 @@
 import { formatCnae, normalizeText, searchTerms } from "../cnae-terms";
 import type { Oportunidade, RaioXResult } from "../raio-x";
 import { SourceError } from "./http";
-import type { SearchResult } from "./pncp";
+import type { SearchOptions, SearchResult } from "./pncp";
 import type { Empresa } from "./receita";
 
 /** Erro com status HTTP e mensagem pronta para o visitante. */
@@ -17,7 +17,7 @@ export class RaioXFailure extends Error {
 
 export type RaioXDeps = {
   getEmpresa: (cnpj: string) => Promise<Empresa>;
-  searchOpen: (term: string, uf?: string, options?: { fallback?: boolean }) => Promise<SearchResult>;
+  searchOpen: (term: string, uf?: string, options?: SearchOptions) => Promise<SearchResult>;
 };
 
 const TOP = 5;
@@ -67,7 +67,9 @@ export async function buildRaioX(cnpj: string, deps: RaioXDeps, now = new Date()
   if (termos.length === 0) return result;
 
   // 1. Na UF da empresa (ou no Brasil, se a Receita não informou a UF).
-  const regional = await Promise.allSettled(termos.map((term) => deps.searchOpen(term, empresa.uf)));
+  const regional = await Promise.allSettled(
+    termos.map((term) => deps.searchOpen(term, empresa.uf, { municipioIbge: empresa.codigoMunicipioIbge })),
+  );
   if (regional.every((settled) => settled.status === "rejected")) {
     const first = regional[0];
     console.error("[raio-x] PNCP:", first.status === "rejected" ? first.reason : first);
@@ -76,7 +78,7 @@ export async function buildRaioX(cnpj: string, deps: RaioXDeps, now = new Date()
   const fromRegion = collect(regional);
   // O PNCP às vezes ignora o filtro de UF: os números contam só a UF da empresa.
   const regionalItems = fromRegion.items.filter((item) => !empresa.uf || !item.uf || item.uf === empresa.uf);
-  let partial = fromRegion.partial || regional.some((settled) => settled.status === "rejected");
+  const partial = fromRegion.partial || regional.some((settled) => settled.status === "rejected");
 
   // 2. Pouca coisa na UF: completa a lista com o Brasil todo, sem reserva
   //    (se a busca já está falhando, não vale insistir no PNCP).
@@ -91,7 +93,7 @@ export async function buildRaioX(cnpj: string, deps: RaioXDeps, now = new Date()
     const known = new Set(regionalItems.map((item) => item.id));
     nationalItems = fromBrasil.items.filter((item) => !known.has(item.id) && item.uf !== empresa.uf);
     nationalHaMais = fromBrasil.haMais;
-    if (national.some((settled) => settled.status === "rejected")) partial = true;
+    // A busca nacional é só um complemento: se ela falhar, os números da UF continuam inteiros.
   }
 
   // Empresa grande não disputa a faixa reservada a ME/EPP.

@@ -5,11 +5,13 @@ import { getJson, memo, SourceError } from "./http";
 /**
  * Licitações abertas no PNCP (Portal Nacional de Contratações Públicas).
  *
- * 1. Busca do portal (pncp.gov.br/api/search): aceita texto livre, então
- *    encontra direto os editais com os termos da empresa.
- * 2. Se a busca falhar, a API oficial de consulta
- *    (/api/consulta/v1/contratacoes/proposta), que não filtra por texto:
- *    baixa uma amostra das contratações abertas da UF e filtra aqui.
+ * 1. Busca do portal (pncp.gov.br/api/search): aceita texto livre, mas
+ *    derruba a conexão (ECONNRESET) vinda da Vercel. Fica como tentativa
+ *    rápida; quando falha, sai do caminho por 30 minutos.
+ * 2. API oficial de consulta (/api/consulta/v1/contratacoes/proposta), que
+ *    responde bem mas não filtra por texto: baixa as contratações abertas do
+ *    município da empresa e uma amostra da UF, guarda por 30 minutos e filtra
+ *    pelo termo aqui.
  *
  * Os dois formatos são lidos com tolerância (campos opcionais), porque o
  * PNCP muda e às vezes ignora filtros sem avisar. Todo resultado é conferido
@@ -31,7 +33,33 @@ export type SearchResult = {
 
 /** Resultados completos ficam guardados 10 minutos; parciais, não. */
 const cachedSearch = memo<SearchResult>(10 * 60 * 1000, 500, (result) => !result.partial);
-const cachedPool = memo<Pool>(10 * 60 * 1000, 60, (pool) => !pool.failedPages);
+/** Contratações abertas de um município ou UF: guardadas 30 minutos (se nenhuma página falhou). */
+const cachedPool = memo<Pool>(30 * 60 * 1000, 300, (pool) => !pool.failedPages);
+
+/** A busca do portal derruba conexões vindas da nuvem: depois de uma falha de rede, 30 min sem tentar. */
+const SEARCH_DOWN_MS = 30 * 60 * 1000;
+let searchDownUntil = 0;
+
+/** Só para testes: zera as pausas da busca e do 429. */
+export function resetPncpStateForTests() {
+  searchDownUntil = 0;
+  busyUntil = 0;
+}
+
+/** Poucas chamadas simultâneas ao PNCP: rajadas de ~15 viram 429. */
+const MAX_CONCURRENT = 4;
+let running = 0;
+const queue: (() => void)[] = [];
+async function limited<T>(task: () => Promise<T>): Promise<T> {
+  if (running >= MAX_CONCURRENT) await new Promise<void>((resolve) => queue.push(resolve));
+  running++;
+  try {
+    return await task();
+  } finally {
+    running--;
+    queue.shift()?.();
+  }
+}
 
 /**
  * O PNCP limita rajadas (429). Depois de um 429, não insiste no mesmo
@@ -43,29 +71,61 @@ let busyUntil = 0;
 async function pncpJson<T>(source: string, url: string, timeoutMs: number) {
   if (Date.now() < busyUntil) throw new SourceError(source, 429, `${source}: ocupado (429 recente)`);
   try {
-    return await getJson<T>(source, url, timeoutMs);
+    return await limited(() => getJson<T>(source, url, timeoutMs));
   } catch (error) {
     if (error instanceof SourceError && error.status === 429) busyUntil = Date.now() + BUSY_MS;
     throw error;
   }
 }
 
-/**
- * Licitações abertas que mencionam `term`, na UF (ou no Brasil todo sem UF).
- * `fallback: false` não usa a API de consulta se a busca falhar.
- */
-export function searchOpen(term: string, uf?: string, { fallback = true } = {}): Promise<SearchResult> {
-  return cachedSearch(`${term}|${uf ?? "BR"}|${fallback}`, async () => {
-    try {
-      return await searchPortal(term, uf);
-    } catch (error) {
-      // Sem reserva, ou com o PNCP limitando pedidos: a reserva bate no mesmo servidor.
-      if (!fallback || !(error instanceof SourceError) || error.status === 429) throw error;
-      console.warn(`[raio-x] busca do PNCP falhou (${error.message}); usando a API de consulta`);
-      const pool = await openPool(uf);
-      const items = pool.items.filter((item) => matchesTerm(item.objeto, term));
-      return { items, haMais: pool.truncated, partial: true };
+export type SearchOptions = {
+  /** false: não usa a API de consulta se a busca do portal falhar (busca nacional). */
+  fallback?: boolean;
+  /** Código IBGE do município da empresa: as licitações dele entram completas. */
+  municipioIbge?: string;
+};
+
+/** Licitações abertas que mencionam `term`, na UF (ou no Brasil todo sem UF). */
+export function searchOpen(term: string, uf?: string, { fallback = true, municipioIbge }: SearchOptions = {}): Promise<SearchResult> {
+  return cachedSearch(`${term}|${uf ?? "BR"}|${municipioIbge ?? ""}|${fallback}`, async () => {
+    if (Date.now() >= searchDownUntil) {
+      try {
+        return await searchPortal(term, uf);
+      } catch (error) {
+        if (!(error instanceof SourceError)) throw error;
+        // Conexão derrubada ou formato estranho: a busca fica de lado por um tempo.
+        if (error.status !== 429) searchDownUntil = Date.now() + SEARCH_DOWN_MS;
+        if (!fallback || error.status === 429) throw error;
+        console.warn(`[raio-x] busca do PNCP falhou (${error.message}); usando a API de consulta`);
+      }
+    } else if (!fallback) {
+      throw new SourceError("PNCP (busca)", 0, "PNCP (busca): fora do ar há pouco, não tentada");
     }
+
+    // Sem UF não há como baixar o Brasil todo pela API de consulta.
+    if (!uf && !municipioIbge) throw new SourceError("PNCP (consulta)", 0, "consulta nacional não suportada");
+
+    const pools = await Promise.allSettled([
+      municipioIbge ? openPool({ municipioIbge }) : Promise.resolve(null),
+      uf ? openPool({ uf }) : Promise.resolve(null),
+    ]);
+    const ok = pools.flatMap((pool) => (pool.status === "fulfilled" && pool.value ? [pool.value] : []));
+    if (ok.length === 0) {
+      const failed = pools.find((pool) => pool.status === "rejected");
+      throw failed?.status === "rejected" ? failed.reason : new SourceError("PNCP (consulta)", 0, "sem resposta");
+    }
+
+    const byId = new Map<string, Oportunidade>();
+    for (const pool of ok) {
+      for (const item of pool.items) {
+        if (!byId.has(item.id) && matchesTerm(item.objeto, term)) byId.set(item.id, item);
+      }
+    }
+    return {
+      items: [...byId.values()],
+      haMais: ok.some((pool) => pool.truncated),
+      partial: ok.some((pool) => pool.failedPages) || pools.some((pool) => pool.status === "rejected"),
+    };
   });
 }
 
@@ -179,15 +239,26 @@ type Pool = {
   failedPages: boolean;
 };
 
-/** Pregão eletrônico (6), dispensa (8) e concorrência eletrônica (4). */
+/**
+ * Pregão eletrônico (6), dispensa (8) e concorrência eletrônica (4), com o
+ * máximo de páginas de 50 lidas por modalidade: no município quase tudo cabe;
+ * na UF é uma amostra (marcada como `truncated`).
+ */
 const MODALIDADES = [6, 8, 4];
-const PAGES = 2;
 const PAGE_SIZE = 50;
+const PAGES = { municipio: 3, uf: 2 } as const;
+/** Propostas que fecham nos próximos 30 dias: o que dá tempo de preparar. */
+const HORIZON_DAYS = 30;
 
-/** Amostra das contratações com propostas abertas nos próximos 60 dias, da UF (ou do Brasil). */
-function openPool(uf?: string): Promise<Pool> {
-  return cachedPool(uf ?? "BR", async () => {
-    const dataFinal = yyyymmdd(new Date(Date.now() + 60 * 24 * 60 * 60 * 1000));
+type PoolScope = { uf: string; municipioIbge?: undefined } | { municipioIbge: string; uf?: undefined };
+
+/** Contratações com propostas abertas de um município ou de uma UF. */
+function openPool(scope: PoolScope): Promise<Pool> {
+  const key = scope.municipioIbge ? `municipio:${scope.municipioIbge}` : `uf:${scope.uf}`;
+  const maxPages = scope.municipioIbge ? PAGES.municipio : PAGES.uf;
+
+  return cachedPool(key, async () => {
+    const dataFinal = yyyymmdd(new Date(Date.now() + HORIZON_DAYS * 24 * 60 * 60 * 1000));
     const page = (modalidade: number, pagina: number) => {
       const params = new URLSearchParams({
         dataFinal,
@@ -195,7 +266,8 @@ function openPool(uf?: string): Promise<Pool> {
         pagina: String(pagina),
         tamanhoPagina: String(PAGE_SIZE),
       });
-      if (uf) params.set("uf", uf);
+      if (scope.municipioIbge) params.set("codigoMunicipioIbge", scope.municipioIbge);
+      else if (scope.uf) params.set("uf", scope.uf);
       return pncpJson<ConsultaJson>(
         "PNCP (consulta)",
         `${BASE}/api/consulta/v1/contratacoes/proposta?${params}`,
@@ -210,9 +282,9 @@ function openPool(uf?: string): Promise<Pool> {
       MODALIDADES.map(async (modalidade) => {
         const first = await page(modalidade, 1);
         const totalPaginas = Number(first?.totalPaginas) || 1;
-        if (totalPaginas > PAGES) truncated = true;
+        if (totalPaginas > maxPages) truncated = true;
         const rest = await Promise.allSettled(
-          Array.from({ length: Math.min(PAGES, totalPaginas) - 1 }, (_, index) => page(modalidade, index + 2)),
+          Array.from({ length: Math.min(maxPages, totalPaginas) - 1 }, (_, index) => page(modalidade, index + 2)),
         );
         if (rest.some((r) => r.status === "rejected")) failedPages = true;
         return [first, ...rest.map((r) => (r.status === "fulfilled" ? r.value : null))];

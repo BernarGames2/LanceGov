@@ -6,6 +6,7 @@ export const brasilApiEmpresa = {
   nome_fantasia: "",
   uf: "SP",
   municipio: "CAMPINAS",
+  codigo_municipio_ibge: 3509502,
   porte: "EMPRESA DE PEQUENO PORTE",
   opcao_pelo_mei: false,
   cnae_fiscal: 4649408,
@@ -26,7 +27,7 @@ export const cnpjaEmpresa = {
     simei: { optant: false },
   },
   status: { id: 2, text: "Ativa" },
-  address: { city: "Campinas", state: "SP" },
+  address: { city: "Campinas", state: "SP", municipality: 3509502 },
   mainActivity: { id: 4649408, text: "Comércio atacadista de produtos de higiene, limpeza e conservação domiciliar" },
   sideActivities: [{ id: 4761003, text: "Comércio varejista de artigos de papelaria" }],
 };
@@ -41,7 +42,7 @@ export const cnpjWsEmpresa = {
     atividade_principal: { id: "4649408", subclasse: "4649-4/08", descricao: "Comércio atacadista de produtos de higiene" },
     atividades_secundarias: [{ id: "4930202", subclasse: "4930-2/02", descricao: "Transporte rodoviário de carga" }],
     estado: { sigla: "SP" },
-    cidade: { nome: "Campinas" },
+    cidade: { nome: "Campinas", ibge_id: 3509502 },
   },
 };
 

@@ -9,9 +9,9 @@ import {
   searchResponse,
 } from "./__fixtures__/fixtures";
 import { SourceError } from "./http";
-import { fromConsultaItem, fromSearchItem, parseDate, searchOpen, titleOrgao } from "./pncp";
+import { fromConsultaItem, fromSearchItem, parseDate, resetPncpStateForTests, searchOpen, titleOrgao } from "./pncp";
 import { buildRaioX, MESSAGES, rank, RaioXFailure, type RaioXDeps } from "./raio-x";
-import { fromCnpjWs, fromReceitaWs, getEmpresa, titleCase, toEmpresa } from "./receita";
+import { fromCnpja, fromCnpjWs, fromReceitaWs, getEmpresa, titleCase, toEmpresa } from "./receita";
 
 const NOW = new Date("2026-10-08T12:00:00-03:00");
 
@@ -25,6 +25,7 @@ function jsonResponse(body: unknown, status = 200) {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  resetPncpStateForTests();
 });
 
 describe("Receita", () => {
@@ -44,21 +45,37 @@ describe("Receita", () => {
     expect(toEmpresa("x", { opcao_pelo_mei: true, porte: "MICRO EMPRESA", razao_social: "A" }).porte).toBe("MEI");
   });
 
-  it("usa as outras fontes quando a BrasilAPI falha, e não espera quando ela falha rápido", async () => {
+  it("usa as outras fontes quando a primeira falha, sem esperar quando ela falha rápido", async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (url.includes("brasilapi")) return jsonResponse({ message: "bloqueado" }, 403);
-      if (url.includes("cnpja")) return jsonResponse(cnpjaEmpresa);
-      return jsonResponse({ message: "erro" }, 500);
+      if (url.includes("cnpja")) return jsonResponse({ message: "bloqueado" }, 403);
+      if (url.includes("cnpj.ws")) return jsonResponse({ message: "erro" }, 500);
+      if (url.includes("receitaws")) return jsonResponse({ status: "ERROR", message: "Too many requests" });
+      if (url.includes("brasilapi")) return jsonResponse({ message: "erro" }, 500);
+      return jsonResponse(brasilApiEmpresa); // Minha Receita, último da fila, no formato da BrasilAPI
     });
     vi.stubGlobal("fetch", fetchMock);
     const started = Date.now();
     const empresa = await getEmpresa("10000000000100");
     expect(Date.now() - started).toBeLessThan(1000);
-    expect(empresa).toMatchObject({ nome: "Distribuidora Exemplo de Limpeza LTDA", uf: "SP", municipio: "CAMPINAS", porte: "EPP" });
+    expect(empresa).toMatchObject({
+      nome: "Distribuidora Exemplo de Limpeza LTDA",
+      uf: "SP",
+      municipio: "CAMPINAS",
+      codigoMunicipioIbge: "3509502",
+      porte: "EPP",
+    });
     expect(empresa.cnaes.map((c) => c.codigo)).toEqual(["4649408", "4761003"]);
   });
 
-  it("lê os formatos do CNPJ.ws e do ReceitaWS", () => {
+  it("lê os formatos do CNPJá, do CNPJ.ws e do ReceitaWS", () => {
+    expect(fromCnpja("1", cnpjaEmpresa)).toMatchObject({
+      nome: "Distribuidora Exemplo de Limpeza LTDA",
+      uf: "SP",
+      codigoMunicipioIbge: "3509502",
+      porte: "EPP",
+      situacao: "ATIVA",
+      cnaes: [{ codigo: "4649408" }, { codigo: "4761003" }],
+    });
     expect(fromCnpjWs("1", cnpjWsEmpresa)).toMatchObject({
       nome: "Limpeza Silva",
       uf: "SP",
@@ -158,7 +175,8 @@ describe("PNCP", () => {
     const result = await searchOpen("material de limpeza", "RJ");
     vi.useRealTimers();
     expect(result.items.map((item) => item.id)).toEqual(["99000000000100-1-000044/2026"]);
-    expect(result.partial).toBe(true);
+    // A consulta leu todas as páginas: o resultado é completo, não parcial.
+    expect(result.partial).toBe(false);
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/consulta/v1/contratacoes/proposta"))).toBe(true);
   });
 
@@ -362,5 +380,45 @@ describe("PNCP: filtro por termo e limite de pedidos", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await expect(searchOpen("outro termo", "MT")).rejects.toMatchObject({ status: 429 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PNCP: consulta como caminho principal", () => {
+  it("lê o município e a UF, e depois de uma queda da busca nem tenta de novo", async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        if (url.includes("/api/search/")) throw new TypeError("fetch failed", { cause: new Error("read ECONNRESET") });
+        return jsonResponse(consultaResponse);
+      }),
+    );
+    const first = await searchOpen("material de limpeza", "SC", { municipioIbge: "4205407" });
+    expect(first.items.map((item) => item.id)).toEqual(["99000000000100-1-000044/2026"]);
+    expect(urls.some((url) => url.includes("codigoMunicipioIbge=4205407"))).toBe(true);
+    expect(urls.some((url) => url.includes("uf=SC"))).toBe(true);
+
+    urls.length = 0;
+    await searchOpen("produtos de higiene", "SC", { municipioIbge: "4205407" });
+    vi.useRealTimers();
+    expect(urls.some((url) => url.includes("/api/search/"))).toBe(false);
+  });
+
+  it("marca haMais quando a UF tem mais páginas do que as lidas", async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        url.includes("/api/search/") ? jsonResponse({}, 503) : jsonResponse({ ...consultaResponse, totalPaginas: 40 }),
+      ),
+    );
+    const result = await searchOpen("material de limpeza", "BA");
+    vi.useRealTimers();
+    expect(result.haMais).toBe(true);
+    expect(result.partial).toBe(false);
   });
 });
